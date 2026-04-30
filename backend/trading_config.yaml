@@ -1,0 +1,41 @@
+sources:
+  twitter:
+    enabled: false
+  reddit:
+    enabled: true
+    subreddits: ["wallstreetbets", "stocks", "investing", "options"]
+    min_score: 3
+  stocktwits:
+    enabled: true
+    trending_only: false
+
+sentiment:
+  vader_threshold: 0.35
+  finbert_threshold: 0.6
+  finbert_device: "cpu"
+
+trading:
+  paper_mode: true
+  max_position_pct: 0.08
+  max_daily_trades: 50
+  max_daily_loss_pct: 0.03
+  order_type: "market"
+  cooldown_seconds: 60
+  default_trade_dollars: 25.0
+  liquidity_reserve_pct: 0.20
+  min_trade_dollars: 5.0
+  max_trade_dollars: 200.0
+
+trending:
+  window_seconds: 300
+  min_mentions: 8
+  auto_trade_trending: true
+
+quant:
+  enabled: true
+  cycle_minutes: 5
+  universe_size: 30
+  min_consensus: 0.55
+  momentum_weight: 0.35
+  reversion_weight: 0.30
+  factor_weight: 0.35

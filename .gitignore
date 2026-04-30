@@ -1,0 +1,77 @@
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+build/
+dist/
+venv/
+.venv/
+env/
+ENV/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.npm
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- ML / model artifacts ---
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.h5
+*.onnx
+*.ckpt
+*.safetensors
+models/checkpoints/
+
+# --- Data / state / cache (trading bot state must NEVER ship) ---
+*.sqlite
+*.sqlite3
+*.db
+data/cache/
+crypto_bot/data/*
+!crypto_bot/data/.gitkeep
+crypto_bot/logging_/*
+!crypto_bot/logging_/.gitkeep
+backend/state/
+backend/cache/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local settings (paths/permissions are user-specific) ---
+.claude/settings.local.json
+.claude/cache/
+.claude/projects/
