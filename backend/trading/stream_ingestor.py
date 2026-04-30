@@ -194,6 +194,9 @@ class StreamIngestor:
         if direction == "bullish":
             result = self.executor.execute_buy(ticker, dollars, f"Sentiment buy: {compound:.2f} from {source}")
         elif direction == "bearish":
+            if not self.signal_bus.positions.get_position(ticker):
+                logger.info(f"SKIP sentiment sell {ticker}: no open position (would be naked short)")
+                return
             result = self.executor.execute_sell(ticker, dollars, f"Sentiment sell: {compound:.2f} from {source}")
         else:
             return
@@ -233,6 +236,7 @@ class StreamIngestor:
                 buying_power = self.executor.get_buying_power()
                 dollars = self.risk_manager.size_trade(sig, equity, buying_power)
                 dollars *= self.adaptive_quant.sizing_multiplier
+                dollars = clamp(dollars, self.config.trading.min_trade_dollars, self.config.trading.max_trade_dollars)
 
                 validation = self.risk_manager.validate_trade(sig, self.signal_bus.positions.get_all(), equity)
                 if not validation["allowed"]:
@@ -242,9 +246,16 @@ class StreamIngestor:
                 self.signal_bus.emit_intent(intent)
 
                 if sig["direction"] == "buy":
-                    self.executor.execute_buy(sig["ticker"], dollars, f"Quant buy: score={sig['ensembleScore']:.3f}")
+                    result = self.executor.execute_buy(sig["ticker"], dollars, f"Quant buy: score={sig['ensembleScore']:.3f}")
+                    if result:
+                        self.signal_bus.positions.update(sig["ticker"], "buy", dollars)
                 elif sig["direction"] == "sell":
-                    self.executor.execute_sell(sig["ticker"], dollars, f"Quant sell: score={sig['ensembleScore']:.3f}")
+                    if not self.signal_bus.positions.get_position(sig["ticker"]):
+                        logger.info(f"SKIP quant sell {sig['ticker']}: no open position (would be naked short)")
+                        continue
+                    result = self.executor.execute_sell(sig["ticker"], dollars, f"Quant sell: score={sig['ensembleScore']:.3f}")
+                    if result:
+                        self.signal_bus.positions.update(sig["ticker"], "sell", dollars)
 
             logger.info(f"Quant cycle: {len(aggregated)} signals, {len(filtered)} after PDT filter, regime={regime.get('regime')}")
         except Exception as e:

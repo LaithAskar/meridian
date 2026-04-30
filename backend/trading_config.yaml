@@ -10,7 +10,7 @@ sources:
     trending_only: false
 
 sentiment:
-  vader_threshold: 0.35
+  vader_threshold: 0.65
   finbert_threshold: 0.6
   finbert_device: "cpu"
 
