@@ -52,6 +52,8 @@ class StreamIngestor:
         self.executor = TradeExecutor(
             paper_mode=config.trading.paper_mode,
             liquidity_reserve_pct=config.trading.liquidity_reserve_pct,
+            max_daily_trades=config.trading.max_daily_trades,
+            max_daily_loss_pct=config.trading.max_daily_loss_pct,
         )
         self.signal_bus = SignalBus()
         self.adaptive = AdaptiveLearner()
@@ -283,6 +285,7 @@ class StreamIngestor:
             "adaptiveSentiment": self.adaptive.get_stats(),
             "adaptiveQuant": self.adaptive_quant.get_stats(),
             "paperMode": self.config.trading.paper_mode,
+            "loggedIn": self.executor.is_logged_in,
         }
 
     def get_signals(self) -> dict[str, Any]:

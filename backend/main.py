@@ -7,6 +7,11 @@ import subprocess
 from typing import Any, Optional
 from contextlib import asynccontextmanager
 
+# Load .env before backend.* imports — BotConfig.from_yaml() reads
+# TRADING_PAPER_MODE at module-import time (backend/trading/config.py).
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -69,9 +74,19 @@ async def lifespan(app: FastAPI):
     ingestor = StreamIngestor(bot_config)
     try:
         ingestor.start()
+        # Synchronize legacy module-level flag with executor login state so
+        # /api/robinhood/* endpoints reflect the bot's auto-login.
+        global _rh_logged_in
+        if ingestor.executor.is_logged_in:
+            _rh_logged_in = True
         logger.info("Trading bot auto-started")
+    except RuntimeError as e:
+        # Real-money login failures raise RuntimeError — fail startup loudly so
+        # uvicorn aborts and the backend never serves with a non-functional bot.
+        logger.critical(f"FATAL startup error: {e}")
+        raise
     except Exception as e:
-        logger.warning(f"Could not auto-start trading bot: {e}")
+        logger.warning(f"Could not auto-start trading bot (non-critical): {e}")
     yield
     if ingestor and ingestor._running:
         ingestor.stop()

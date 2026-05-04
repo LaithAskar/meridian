@@ -15,25 +15,25 @@ sentiment:
   finbert_device: "cpu"
 
 trading:
-  paper_mode: true
-  max_position_pct: 0.08
-  max_daily_trades: 50
-  max_daily_loss_pct: 0.03
+  paper_mode: false
+  max_position_pct: 0.05
+  max_daily_trades: 6
+  max_daily_loss_pct: 0.10
   order_type: "market"
   cooldown_seconds: 60
-  default_trade_dollars: 25.0
+  default_trade_dollars: 10.0
   liquidity_reserve_pct: 0.20
-  min_trade_dollars: 5.0
-  max_trade_dollars: 200.0
+  min_trade_dollars: 1.0
+  max_trade_dollars: 25.0
 
 trending:
   window_seconds: 300
   min_mentions: 8
-  auto_trade_trending: true
+  auto_trade_trending: false
 
 quant:
   enabled: true
-  cycle_minutes: 5
+  cycle_minutes: 15
   universe_size: 30
   min_consensus: 0.55
   momentum_weight: 0.35

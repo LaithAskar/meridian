@@ -5,7 +5,7 @@ import time
 import logging
 from datetime import datetime, date
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from backend.utils.helpers import safe_float
 
@@ -17,6 +17,35 @@ try:
 except ImportError:
     RH_AVAILABLE = False
     logger.warning("robin_stocks not available")
+
+
+def _classify_order_response(order: Any, trade_record: dict) -> None:
+    """Robinhood may return non_field_errors as warnings on a successful submit.
+    Source of truth is the order id — if present, the order was accepted."""
+    if order is None or not isinstance(order, dict):
+        trade_record["status"] = "failed"
+        trade_record["error"] = "Order returned None"
+        return
+    order_id = order.get("id")
+    if order_id:
+        trade_record["status"] = "submitted"
+        trade_record["order_id"] = order_id
+        if "non_field_errors" in order:
+            trade_record["warning"] = str(order["non_field_errors"])
+    elif "non_field_errors" in order:
+        trade_record["status"] = "rejected"
+        trade_record["error"] = str(order["non_field_errors"])
+    else:
+        trade_record["status"] = "failed"
+        trade_record["error"] = f"Unexpected response shape: {list(order.keys())[:5]}"
+
+
+def _log_trade(side: str, ticker: str, dollars: float, trade_record: dict, reason: str) -> None:
+    detail = trade_record.get("error") or trade_record.get("warning") or ""
+    detail_part = f" [{detail}]" if detail else ""
+    logger.info(
+        f"{side} {ticker} ${dollars:.2f} - {trade_record.get('status')}{detail_part} - {reason}"
+    )
 
 
 class PDTTracker:
@@ -69,12 +98,21 @@ class PDTTracker:
 
 
 class CircuitBreaker:
-    def __init__(self, max_daily_loss_pct: float = 0.03, max_daily_trades: int = 50):
+    def __init__(
+        self,
+        max_daily_loss_pct: float = 0.03,
+        max_daily_trades: int = 50,
+        equity_provider: Optional[Callable[[], float]] = None,
+        max_consecutive_failures: int = 5,
+    ):
         self.max_daily_loss_pct = max_daily_loss_pct
         self.max_daily_trades = max_daily_trades
+        self.max_consecutive_failures = max_consecutive_failures
+        self._equity_provider = equity_provider
         self._trades_today = 0
         self._daily_pnl = 0.0
         self._starting_equity = 0.0
+        self._consecutive_failures = 0
         self._tripped = False
         self._trip_reason = ""
         self._last_reset = date.today()
@@ -86,86 +124,189 @@ class CircuitBreaker:
             self._daily_pnl = 0.0
             self._tripped = False
             self._trip_reason = ""
+            self._starting_equity = 0.0
+            self._consecutive_failures = 0
             self._last_reset = today
 
-    def record_trade(self, pnl: float = 0):
+    def prime_starting_equity(self, equity: float) -> None:
+        if self._starting_equity == 0.0 and equity > 0:
+            self._starting_equity = equity
+            logger.info(f"CircuitBreaker primed: starting_equity=${equity:.2f}, loss_halt=${equity * self.max_daily_loss_pct:.2f}")
+
+    def record_trade(self):
         self.reset_daily()
         self._trades_today += 1
-        self._daily_pnl += pnl
+        self._consecutive_failures = 0
         if self._trades_today >= self.max_daily_trades:
             self._tripped = True
             self._trip_reason = f"Max daily trades reached ({self.max_daily_trades})"
-        if self._starting_equity > 0:
+
+    def record_failure(self):
+        self.reset_daily()
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.max_consecutive_failures:
+            self._tripped = True
+            self._trip_reason = f"Consecutive-failure halt ({self._consecutive_failures} non-fills)"
+
+    def _refresh_pnl(self) -> None:
+        if self._starting_equity <= 0 or self._equity_provider is None:
+            return
+        try:
+            current = self._equity_provider()
+        except Exception as e:
+            logger.warning(f"CircuitBreaker equity probe failed: {e}")
+            return
+        if current <= 0:
+            return
+        self._daily_pnl = current - self._starting_equity
+        if self._daily_pnl < 0:
             loss_pct = abs(self._daily_pnl) / self._starting_equity
-            if self._daily_pnl < 0 and loss_pct >= self.max_daily_loss_pct:
+            if loss_pct >= self.max_daily_loss_pct:
                 self._tripped = True
-                self._trip_reason = f"Daily loss limit hit ({loss_pct:.1%})"
+                self._trip_reason = f"Daily loss limit hit ({loss_pct:.1%}, ${self._daily_pnl:.2f})"
 
     def is_tripped(self) -> bool:
         self.reset_daily()
+        if not self._tripped:
+            self._refresh_pnl()
         return self._tripped
 
     def status(self) -> dict:
         self.reset_daily()
+        if not self._tripped:
+            self._refresh_pnl()
         return {
             "tripped": self._tripped,
             "reason": self._trip_reason,
             "tradesToday": self._trades_today,
             "dailyPnl": round(self._daily_pnl, 2),
+            "startingEquity": round(self._starting_equity, 2),
+            "consecutiveFailures": self._consecutive_failures,
         }
 
 
 class TradeExecutor:
-    def __init__(self, paper_mode: bool = False, liquidity_reserve_pct: float = 0.20):
+    def __init__(
+        self,
+        paper_mode: bool = False,
+        liquidity_reserve_pct: float = 0.20,
+        max_daily_trades: int = 50,
+        max_daily_loss_pct: float = 0.03,
+    ):
         self.paper_mode = paper_mode
         self.liquidity_reserve_pct = liquidity_reserve_pct
         self.pdt = PDTTracker()
-        self.circuit_breaker = CircuitBreaker()
+        self.circuit_breaker = CircuitBreaker(
+            max_daily_loss_pct=max_daily_loss_pct,
+            max_daily_trades=max_daily_trades,
+            equity_provider=self.get_equity,
+        )
         self._logged_in = False
         self._trade_log: list[dict] = []
         self._cooldowns: dict[str, float] = {}
         self._cooldown_seconds = 60
+        # TTL cache for account snapshots — Robinhood 429s when hammered.
+        # 10s is short enough that loss-halt detection lag is negligible
+        # (max possible $-loss in 10s on $10 trades is well under the $20 budget).
+        self._snapshot_ttl = 10.0
+        self._bp_cache: tuple[float, float] = (0.0, 0.0)
+        self._equity_cache: tuple[float, float] = (0.0, 0.0)
+        # Inter-order spacing — RH's POST /orders endpoint 429s under burst load.
+        self._order_min_spacing = 3.0
+        self._last_order_time = 0.0
+
+    def _throttle_order(self) -> None:
+        if self.paper_mode:
+            return
+        elapsed = time.time() - self._last_order_time
+        if elapsed < self._order_min_spacing:
+            time.sleep(self._order_min_spacing - elapsed)
+        self._last_order_time = time.time()
+
+    @property
+    def is_logged_in(self) -> bool:
+        return self._logged_in
 
     def login(self, username: str = "", password: str = ""):
-        if not RH_AVAILABLE:
-            logger.warning("robin_stocks not available, running in paper mode")
-            self.paper_mode = True
+        if self.paper_mode:
+            logger.info("TRADING_PAPER_MODE=true — skipping Robinhood login")
             return
+        if not RH_AVAILABLE:
+            raise RuntimeError(
+                "real-money mode requires robin_stocks library, but it is not installed"
+            )
+        u = username or os.getenv("ROBINHOOD_USERNAME", "")
+        p = password or os.getenv("ROBINHOOD_PASSWORD", "")
+        if not u or not p:
+            raise RuntimeError(
+                "real-money mode requires ROBINHOOD_USERNAME and ROBINHOOD_PASSWORD env vars"
+            )
         try:
-            u = username or os.getenv("ROBINHOOD_USERNAME", "")
-            p = password or os.getenv("ROBINHOOD_PASSWORD", "")
-            if not u or not p:
-                logger.warning("No Robinhood credentials, running in paper mode")
-                self.paper_mode = True
-                return
             rh.login(u, p, store_session=True)
-            self._logged_in = True
-            logger.info("Robinhood login successful")
         except Exception as e:
             logger.error(f"Robinhood login failed: {e}")
-            self.paper_mode = True
+            raise RuntimeError("Robinhood login failed (see backend log for details)") from e
+        self._logged_in = True
+        logger.info("Robinhood login successful")
+        equity = self.get_equity()
+        self.circuit_breaker.prime_starting_equity(equity)
+        self._prime_pdt_from_holdings()
+
+    def _prime_pdt_from_holdings(self) -> None:
+        """Mark all current Robinhood holdings as 'bought today' on startup.
+        RH doesn't expose per-lot timestamps for fractional shares, so we can't
+        tell which positions were opened today. Conservatively treating all as
+        same-day prevents the bot from accidentally creating day-trades after
+        a mid-session restart."""
+        try:
+            holdings = rh.account.build_holdings() or {}
+        except Exception as e:
+            logger.warning(f"PDT re-prime failed (held tickers not reseeded): {e}")
+            return
+        for ticker in holdings.keys():
+            self.pdt.record_buy(ticker)
+        if holdings:
+            logger.info(f"PDT re-primed (sells blocked today) for: {list(holdings.keys())}")
 
     def get_buying_power(self) -> float:
         if self.paper_mode or not self._logged_in:
             return 10000.0
+        now = time.time()
+        cached_at, cached = self._bp_cache
+        if now - cached_at < self._snapshot_ttl:
+            return cached
         try:
-            profile = rh.profiles.load_account_profile()
-            bp = safe_float(profile.get("buying_power", 0))
-            equity = safe_float(profile.get("equity", 0))
+            account = rh.profiles.load_account_profile()
+            portfolio = rh.profiles.load_portfolio_profile()
+            if not isinstance(account, dict) or not isinstance(portfolio, dict):
+                raise RuntimeError("Robinhood returned non-dict profile (likely rate-limited)")
+            bp = safe_float(account.get("buying_power", 0))
+            equity = safe_float(portfolio.get("equity", 0))
             reserve = equity * self.liquidity_reserve_pct
-            return max(0, bp - reserve)
+            value = max(0, bp - reserve)
         except Exception as e:
             logger.error(f"Error getting buying power: {e}")
-            return 0
+            return cached if cached_at > 0 else 0
+        self._bp_cache = (now, value)
+        return value
 
     def get_equity(self) -> float:
         if self.paper_mode or not self._logged_in:
             return 10000.0
+        now = time.time()
+        cached_at, cached = self._equity_cache
+        if now - cached_at < self._snapshot_ttl:
+            return cached
         try:
-            profile = rh.profiles.load_account_profile()
-            return safe_float(profile.get("equity", 0))
-        except Exception:
-            return 0
+            portfolio = rh.profiles.load_portfolio_profile()
+            if not isinstance(portfolio, dict):
+                raise RuntimeError("Robinhood returned non-dict portfolio (likely rate-limited)")
+            value = safe_float(portfolio.get("equity", 0))
+        except Exception as e:
+            logger.error(f"Error getting equity: {e}")
+            return cached if cached_at > 0 else 0
+        self._equity_cache = (now, value)
+        return value
 
     def _in_cooldown(self, ticker: str) -> bool:
         last = self._cooldowns.get(ticker, 0)
@@ -179,9 +320,6 @@ class TradeExecutor:
             return None
         if dollars < 1:
             return None
-
-        self.pdt.record_buy(ticker)
-        self._cooldowns[ticker] = time.time()
 
         trade_record = {
             "ticker": ticker,
@@ -197,25 +335,26 @@ class TradeExecutor:
             trade_record["order_id"] = f"paper_{int(time.time())}"
         else:
             try:
+                self._throttle_order()
                 order = rh.orders.order_buy_fractional_by_price(
                     ticker, dollars, timeInForce="gfd"
                 )
-                if order is None or not isinstance(order, dict):
-                    trade_record["status"] = "failed"
-                    trade_record["error"] = "Order returned None"
-                elif "non_field_errors" in order:
-                    trade_record["status"] = "rejected"
-                    trade_record["error"] = str(order["non_field_errors"])
-                else:
-                    trade_record["status"] = "submitted"
-                    trade_record["order_id"] = order.get("id", "unknown")
+                _classify_order_response(order, trade_record)
             except Exception as e:
                 trade_record["status"] = "error"
                 trade_record["error"] = str(e)
 
+        # Cooldown applies to any attempt to prevent rapid retries on rejection.
+        # PDT tracking and circuit-breaker counting only on actual fills/submissions.
+        self._cooldowns[ticker] = time.time()
+        if trade_record.get("status") in ("paper_filled", "submitted"):
+            self.pdt.record_buy(ticker)
+            self.circuit_breaker.record_trade()
+        else:
+            self.circuit_breaker.record_failure()
+
         self._trade_log.append(trade_record)
-        self.circuit_breaker.record_trade()
-        logger.info(f"BUY {ticker} ${dollars:.2f} - {trade_record.get('status')} - {reason}")
+        _log_trade("BUY", ticker, dollars, trade_record, reason)
         return trade_record
 
     def execute_sell(self, ticker: str, dollars: float, reason: str = "") -> Optional[dict]:
@@ -228,7 +367,6 @@ class TradeExecutor:
         if self._in_cooldown(ticker):
             return None
 
-        self._cooldowns[ticker] = time.time()
         trade_record = {
             "ticker": ticker,
             "side": "sell",
@@ -243,25 +381,24 @@ class TradeExecutor:
             trade_record["order_id"] = f"paper_{int(time.time())}"
         else:
             try:
+                self._throttle_order()
                 order = rh.orders.order_sell_fractional_by_price(
                     ticker, dollars, timeInForce="gfd"
                 )
-                if order is None or not isinstance(order, dict):
-                    trade_record["status"] = "failed"
-                    trade_record["error"] = "Order returned None"
-                elif "non_field_errors" in order:
-                    trade_record["status"] = "rejected"
-                    trade_record["error"] = str(order["non_field_errors"])
-                else:
-                    trade_record["status"] = "submitted"
-                    trade_record["order_id"] = order.get("id", "unknown")
+                _classify_order_response(order, trade_record)
             except Exception as e:
                 trade_record["status"] = "error"
                 trade_record["error"] = str(e)
 
+        self._cooldowns[ticker] = time.time()
+        if trade_record.get("status") in ("paper_filled", "submitted"):
+            self.pdt.record_sell(ticker)
+            self.circuit_breaker.record_trade()
+        else:
+            self.circuit_breaker.record_failure()
+
         self._trade_log.append(trade_record)
-        self.circuit_breaker.record_trade()
-        logger.info(f"SELL {ticker} ${dollars:.2f} - {trade_record.get('status')} - {reason}")
+        _log_trade("SELL", ticker, dollars, trade_record, reason)
         return trade_record
 
     def get_trade_log(self, limit: int = 50) -> list[dict]:
