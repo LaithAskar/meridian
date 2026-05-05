@@ -26,6 +26,8 @@ from backend.trading.quant.signal_aggregator import aggregate_signals
 from backend.trading.quant.risk_manager import QuantRiskManager
 from backend.trading.quant.pdt_guard import PDTGuard
 from backend.trading.quant.adaptive_quant import AdaptiveQuant
+from backend.trading.spx_universe import is_spx_member
+from backend.trading.exit_engine import TimeStop
 from backend.utils.helpers import safe_float, clamp
 
 logger = logging.getLogger(__name__)
@@ -60,7 +62,12 @@ def is_tradeable_window(blackout_min: int) -> bool:
 class StreamIngestor:
     def __init__(self, config: BotConfig):
         self.config = config
-        self.sentiment_engine = SentimentEngine(config.sentiment.vader_threshold)
+        self.sentiment_engine = SentimentEngine(
+            vader_threshold=config.sentiment.vader_threshold,
+            finbert_threshold=config.sentiment.finbert_threshold,
+            finbert_device=config.sentiment.finbert_device,
+            prefer_finbert=True,
+        )
         self.ticker_extractor = TickerExtractor()
         self.executor = TradeExecutor(
             paper_mode=config.trading.paper_mode,
@@ -90,6 +97,10 @@ class StreamIngestor:
         self._quant_interval = config.quant.cycle_minutes * 60
         self._ws_clients: list[Any] = []
         self._start_time: Optional[float] = None
+        self.time_stop = (
+            TimeStop(holding_days=config.trading.time_stop_days)
+            if config.trading.time_stop_days > 0 else None
+        )
 
     def start(self):
         if self._running:
@@ -116,6 +127,7 @@ class StreamIngestor:
                     if now - self._last_quant_run >= self._quant_interval:
                         self._quant_cycle()
                         self._last_quant_run = now
+                    self._time_stop_cycle()
                 elif is_market_hours():
                     logger.debug(f"In open blackout (first {self.config.trading.open_blackout_minutes}min), skipping cycle")
                 else:
@@ -187,6 +199,9 @@ class StreamIngestor:
             logger.error(f"Sentiment cycle error: {e}")
 
     def _execute_sentiment_trade(self, ticker: str, direction: str, compound: float, source: str):
+        if not is_spx_member(ticker):
+            logger.debug(f"SKIP sentiment trade {ticker}: not in S&P 500 universe")
+            return
         buying_power = self.executor.get_buying_power()
         equity = self.executor.get_equity()
         if buying_power < 5:
@@ -221,6 +236,32 @@ class StreamIngestor:
         if result:
             self.signal_bus.positions.update(ticker, "buy" if direction == "bullish" else "sell", dollars)
 
+    def _time_stop_cycle(self):
+        """Liquidate positions older than time_stop_days. Live-mode only;
+        no-op in paper mode (no real positions to track)."""
+        if self.time_stop is None:
+            return
+        if self.executor.paper_mode or not self.executor.is_logged_in:
+            return
+        try:
+            from backend.trading import trade_executor as te_mod
+            if not te_mod.RH_AVAILABLE:
+                return
+            due = self.time_stop.get_positions_to_exit(te_mod.rh)
+        except Exception as e:
+            logger.warning(f"TimeStop scan error: {e}")
+            return
+        for pos in due:
+            ticker = pos["ticker"]
+            dollars = pos["dollars"]
+            days = pos["days_held"]
+            reason = f"TimeStop: held {days}d (>= {self.time_stop.holding_days}d)"
+            logger.info(f"TimeStop liquidating {ticker} ${dollars:.2f} ({days}d held)")
+            result = self.executor.execute_sell(ticker, dollars, reason)
+            if result and result.get("status") in ("submitted", "paper_filled"):
+                self.time_stop.mark_exited(ticker)
+                self.signal_bus.positions.update(ticker, "sell", dollars)
+
     def _quant_cycle(self):
         try:
             logger.info("Running quant engine cycle")
@@ -246,6 +287,9 @@ class StreamIngestor:
             filtered = self.pdt_guard.filter_signals(aggregated, equity)
 
             for sig in filtered[:5]:
+                if not is_spx_member(sig["ticker"]):
+                    logger.debug(f"SKIP quant trade {sig['ticker']}: not in S&P 500 universe")
+                    continue
                 signal = {**sig, "engine": "quant"}
                 self.signal_bus.emit_signal(signal)
                 self._broadcast_signal(signal)

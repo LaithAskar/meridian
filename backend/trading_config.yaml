@@ -15,10 +15,11 @@ sentiment:
   finbert_device: "cpu"
 
 trading:
-  paper_mode: false
+  paper_mode: true
   max_position_pct: 0.05
   max_daily_trades: 15
   open_blackout_minutes: 15
+  time_stop_days: 5
   max_daily_loss_pct: 0.10
   order_type: "market"
   cooldown_seconds: 60

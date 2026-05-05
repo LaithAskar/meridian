@@ -38,6 +38,7 @@ class TradingConfig:
     min_trade_dollars: float = 5.0
     max_trade_dollars: float = 200.0
     open_blackout_minutes: int = 0
+    time_stop_days: int = 0  # 0 disables time-stop exits
 
 
 @dataclass
