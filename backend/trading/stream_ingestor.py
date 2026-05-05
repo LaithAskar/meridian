@@ -44,6 +44,19 @@ def is_market_hours() -> bool:
     return True
 
 
+def is_tradeable_window(blackout_min: int) -> bool:
+    """Market open AND past the open-blackout window. Blackout suppresses
+    stale-headline blast at open by skipping the first N minutes."""
+    if not is_market_hours():
+        return False
+    if blackout_min <= 0:
+        return True
+    now = datetime.now()
+    if now.hour == 9 and now.minute < 30 + blackout_min:
+        return False
+    return True
+
+
 class StreamIngestor:
     def __init__(self, config: BotConfig):
         self.config = config
@@ -97,12 +110,14 @@ class StreamIngestor:
     def _run_loop(self):
         while self._running:
             try:
-                if is_market_hours():
+                if is_tradeable_window(self.config.trading.open_blackout_minutes):
                     self._sentiment_cycle()
                     now = time.time()
                     if now - self._last_quant_run >= self._quant_interval:
                         self._quant_cycle()
                         self._last_quant_run = now
+                elif is_market_hours():
+                    logger.debug(f"In open blackout (first {self.config.trading.open_blackout_minutes}min), skipping cycle")
                 else:
                     logger.debug("Market closed, sleeping 60s")
                 cycle_sleep = 30 + (60 * (0 if is_market_hours() else 1))

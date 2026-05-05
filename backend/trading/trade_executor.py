@@ -250,23 +250,71 @@ class TradeExecutor:
         logger.info("Robinhood login successful")
         equity = self.get_equity()
         self.circuit_breaker.prime_starting_equity(equity)
-        self._prime_pdt_from_holdings()
+        self._maybe_prime_pdt_from_holdings()
 
-    def _prime_pdt_from_holdings(self) -> None:
-        """Mark all current Robinhood holdings as 'bought today' on startup.
-        RH doesn't expose per-lot timestamps for fractional shares, so we can't
-        tell which positions were opened today. Conservatively treating all as
-        same-day prevents the bot from accidentally creating day-trades after
-        a mid-session restart."""
+    def _maybe_prime_pdt_from_holdings(self) -> None:
+        """Prime PDT bought_today AND breaker tradesToday from RH order history.
+        - PDT: mark only tickers with FILLED BUY orders today as bought_today
+          (yesterday's positions stay sellable, today's fills get day-trade
+          protection).
+        - Breaker tradesToday: count ALL submissions today (filled, rejected,
+          any state). Mirrors in-memory semantic where record_trade fires on
+          submission, not fill. Keeps the cap meaningful across restarts."""
+        state_file = os.path.expanduser("~/.meridian_last_run")
+        today = date.today().isoformat()
         try:
-            holdings = rh.account.build_holdings() or {}
+            with open(state_file, "w") as f:
+                f.write(today)
         except Exception as e:
-            logger.warning(f"PDT re-prime failed (held tickers not reseeded): {e}")
+            logger.warning(f"Could not write last-run state: {e}")
+
+        try:
+            orders = rh.orders.get_all_stock_orders() or []
+        except Exception as e:
+            logger.warning(f"PDT/breaker prime: could not fetch order history: {e}")
             return
-        for ticker in holdings.keys():
+
+        symbol_cache: dict[str, str] = {}
+        today_bought: set[str] = set()
+        today_submission_count = 0
+        for o in orders:
+            if not isinstance(o, dict):
+                continue
+            if not o.get("created_at", "").startswith(today):
+                continue
+            today_submission_count += 1
+            if o.get("side") != "buy" or o.get("state") != "filled":
+                continue
+            url = o.get("instrument", "")
+            if not url:
+                continue
+            sym = symbol_cache.get(url)
+            if sym is None:
+                try:
+                    inst = rh.stocks.get_instrument_by_url(url) or {}
+                    sym = inst.get("symbol", "") or ""
+                except Exception:
+                    sym = ""
+                symbol_cache[url] = sym
+            if sym:
+                today_bought.add(sym)
+
+        for ticker in today_bought:
             self.pdt.record_buy(ticker)
-        if holdings:
-            logger.info(f"PDT re-primed (sells blocked today) for: {list(holdings.keys())}")
+
+        if today_submission_count > 0:
+            self.circuit_breaker._trades_today = today_submission_count
+            cap = self.circuit_breaker.max_daily_trades
+            if today_submission_count >= cap:
+                self.circuit_breaker._tripped = True
+                self.circuit_breaker._trip_reason = f"Max daily trades reached ({cap}) — primed from RH history"
+
+        if today_bought:
+            logger.info(f"PDT primed from RH (today's filled buys, sells blocked): {sorted(today_bought)}")
+        if today_submission_count > 0:
+            logger.info(f"Breaker tradesToday primed from RH: {today_submission_count}/{self.circuit_breaker.max_daily_trades} submissions today")
+        if not today_bought and today_submission_count == 0:
+            logger.info("PDT/breaker prime: no same-day RH activity found")
 
     def get_buying_power(self) -> float:
         if self.paper_mode or not self._logged_in:
