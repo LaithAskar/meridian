@@ -1,0 +1,25 @@
+coins: [BTC, ETH, SOL, LINK, AVAX, DOGE, SHIB, XLM]
+cycle_interval_minutes: 2
+dry_run: true
+
+signals:
+  buy_threshold: 0.25
+  sell_threshold: -0.20
+  min_confirmations: 3
+  confirmation_threshold: 3
+
+risk:
+  risk_per_trade_pct: 1.0
+  max_position_pct: 15.0
+  max_daily_loss_pct: 3.0
+  max_drawdown_pct: 10.0
+  max_open_positions: 5
+  atr_multiplier: 1.8
+  max_trade_dollars: 40.0
+  min_trade_dollars: 1.0
+
+execution:
+  order_type: market
+  limit_offset_pct: 0.05
+  order_timeout_seconds: 30
+  max_spread_pct: 1.0
