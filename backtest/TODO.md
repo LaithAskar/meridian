@@ -8,7 +8,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 0 — Bootstrap (do these first, in order)
 
-- [ ] **0.1 — Data infra: Alpaca historical bar fetcher with parquet cache.**
+- [done] **0.1 — Data infra: Alpaca historical bar fetcher with parquet cache.**
   - File: `backtest/data.py`
   - Function: `fetch_bars(symbols: list[str], start: date, end: date, timeframe='1Hour') -> pd.DataFrame`
   - Cache layer: parquet at `data/cache/{symbol}_{timeframe}.parquet`. If cached file covers requested range, skip API call.
