@@ -62,6 +62,15 @@ _REGIME_WEIGHTS: dict[str, dict[str, float]] = {
 _VIX_CRISIS_LEVEL = 30.0
 _VIX_HIGH_VOL_LEVEL = 22.0
 
+# Maximum bars of history passed to signal functions on each call.
+# The signal functions only need:
+#   - Last 252 bars for 12-month momentum return (iloc[-252])
+#   - Last ~78 bars for EMA(26) convergence (3× span rule-of-thumb)
+#   - Last 20 bars for Bollinger Band (period=20)
+# Capping at 300 keeps per-bar compute O(300) instead of O(T), reducing
+# runtime by ~10× at the end of a 14-year backtest (T ≈ 3 528 trading days).
+_MAX_SIGNAL_HISTORY = 300
+
 
 class QuantStrategy(Strategy):
     """
@@ -134,9 +143,10 @@ class QuantStrategy(Strategy):
         if max_bars < self._min_history_bars:
             return []
 
-        # 3. Build universe_data — each symbol needs ≥ 30 bars (mean-rev min)
+        # 3. Build universe_data — each symbol needs ≥ 30 bars (mean-rev min).
+        # Trim to _MAX_SIGNAL_HISTORY to bound per-bar work (see constant above).
         universe_data: dict[str, pd.DataFrame] = {
-            sym: pd.DataFrame(rows)
+            sym: pd.DataFrame(rows[-_MAX_SIGNAL_HISTORY:])
             for sym, rows in self._history.items()
             if len(rows) >= 30
         }

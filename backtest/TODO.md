@@ -100,7 +100,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 3 — Run + report
 
-- [ ] **3.1 — Run quant strategy end-to-end over full window.**
+- [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance — see journal/2026-05-15-pm9.md for options] **3.1 — Run quant strategy end-to-end over full window.**
 - [ ] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
 - [ ] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
 - [ ] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
