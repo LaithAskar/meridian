@@ -47,7 +47,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 1 — Engine
 
-- [ ] **1.1 — Strategy ABC and Order dataclass.**
+- [done] **1.1 — Strategy ABC and Order dataclass.**
   - File: `backtest/strategy.py`
   - Define `Order` (symbol, side, qty, order_type='market_next_open'), `Position` (symbol, qty, avg_cost), `Portfolio` (cash, positions, equity).
   - Define `Strategy(ABC)` with abstract `on_bar(self, ts: datetime, bars: dict[str, pd.Series], portfolio: Portfolio) -> list[Order]`.
