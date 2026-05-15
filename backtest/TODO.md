@@ -59,7 +59,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Edge cases: handle gap-up/gap-down (just use the open price, don't try to model partial fills). If next_bar is missing (e.g., delisted), order is cancelled.
   - Tests: known order → known fill price, both sides.
 
-- [ ] **1.3 — Engine event loop.**
+- [done] **1.3 — Engine event loop.**
   - File: `backtest/engine.py`
   - `class Engine`: takes (strategy, universe, start, end, initial_cash, max_positions). Iterates bars in time order. For each ts: calls strategy.on_bar, simulates fills at NEXT bar's open, updates portfolio, records state.
   - State recording: at each ts, snapshot (equity, cash, positions, num_positions). Save as a list of dicts → DataFrame at end.
