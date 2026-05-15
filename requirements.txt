@@ -1,6 +1,6 @@
 fastapi==0.109.2
 uvicorn[standard]==0.27.1
-yfinance>=1.2.0
+yfinance>=0.2.40
 pandas>=2.2.0
 numpy>=1.26.4
 scikit-learn>=1.4.0
