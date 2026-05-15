@@ -1,6 +1,6 @@
 # Meridian Backtester — TODO
 
-Routine reads this top-to-bottom. Take the **top unfinished item**, execute it, mark it `[done]`, write the recap, commit, stop. Do not skip ahead. Do not bundle multiple items per run unless one truly blocks the other and the combined work fits in one session.
+Routine reads this top-to-bottom. Take the **top item that is neither `[done]` nor `[blocked]`** — i.e., the first `[ ]` or `[~]`. You MAY skip over `[blocked]` items to keep working, but you may NOT skip over `[ ]` or `[~]` items. Execute the chosen item, mark it `[done]` (or `[~]` if not finished, `[blocked: <reason>]` if it requires Laith input), write the recap, commit, stop. Do not bundle multiple items per run unless one truly blocks the other and the combined work fits in one session.
 
 Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[done]` completed · `[blocked: <reason>]` needs Laith input
 
@@ -23,11 +23,19 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Export: `UNIVERSE_2016: list[str]`
   - Tests: assert len == 100, assert all uppercase tickers, assert no duplicates.
 
-- [ ] **0.3 — Bulk-download all hourly bars for the universe over 2016-01-01 to 2024-12-31.**
-  - One-time script: `backtest/scripts/bulk_download.py`
-  - Use the fetcher from 0.1. Iterate the universe. Handle rate limits (Alpaca free tier: 200 req/min). Sleep + retry on 429s.
-  - Acceptance: `data/cache/` populated with ~100 parquet files. Spot-check 3 random symbols for date coverage and bar count.
-  - Estimate: ~75-90 minutes wall clock. Routine should plan accordingly — this likely consumes a full run.
+- [ ] **0.2.5 — Verify UNIVERSE_2016 against a primary source and correct any errors.**
+  - The current list in `backtest/universe.py` was reconstructed by the routine from training-data memory, not verified against an authoritative reference. Laith flagged concerns specifically about AVGO (Broadcom may not have been in OEX in Jan 2016) and possible omissions (e.g., BAX, KMI, YUM).
+  - Use `WebFetch` to pull the Wikipedia article "S&P 100" — its "Component changes" or "Historical components" section is the most accessible primary source. Cross-reference: confirm each ticker in `UNIVERSE_2016` was a constituent on 2016-01-01, and confirm no Jan-2016 constituents are missing.
+  - For renamed tickers (FB→META, PCLN→BKNG already handled), keep the modern Alpaca-compatible ticker but document the historical name in the docstring.
+  - If the constituent list needs to change: edit `universe.py`, keep len == 100, re-run tests, and document the corrections in the recap with citations to the source URL and the specific Wikipedia revision/date you used.
+  - Acceptance: every ticker in `UNIVERSE_2016` is verified against a citable source. The docstring methodology section is updated to reflect the verification.
+
+- [ ] **0.3 — Verify the pre-committed data bundle.**
+  - **Context update (2026-05-15):** Original Phase 0.3 was a bulk-download script. That required `ALPACA_API_KEY` in the cloud agent's env, which the `/schedule` routine config doesn't support. Laith is downloading the data locally and committing/pushing the parquet cache to the repo himself.
+  - Task: verify the committed cache. List parquet files under `data/cache/`. Confirm there is one file per ticker in `UNIVERSE_2016`. For 3 random symbols, load the parquet and assert: (a) timestamp index spans at least 2016-01-01 → 2024-12-31, (b) row count is reasonable (≈9 yr × 250 trading days × 6.5 hr ≈ 14k rows; allow ±30% for partial-history tickers), (c) no NaN in OHLCV columns, (d) timestamps are tz-aware UTC.
+  - If `data/cache/` is empty or partial: mark `[blocked: waiting for Laith to commit parquet bundle]`, write a recap noting which symbols are missing, and skip to Phase 1.
+  - If the cache is complete: mark `[done]`, write a recap with the spot-check results, move to Phase 1.
+  - Do NOT attempt to fetch missing data from Alpaca — the routine has no credentials. Block instead.
 
 ## Phase 1 — Engine
 
