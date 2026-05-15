@@ -1,241 +1,151 @@
-# Meridian + Tachyon Roadmap — Path to August 2026
+# Meridian Backtester Roadmap — Path to August 2026
 
-**Created 2026-05-15. Owner: Laith. Updated weekly (Friday EOD review).**
+**Scope: Meridian only.** Tachyon, NeetCode, referrals, behavioral prep, resume work live outside this repo. This doc covers only what gets built in `meridian/` between now and the August application window.
+
+**Created 2026-05-15. Owner: Laith. Review every Friday EOD.**
 
 ---
 
 ## Goal
 
-By **July 31, 2026** (11 weeks from now), have all of:
+By **July 31, 2026**, Meridian has shipped:
 
-1. **Meridian backtester shipped** — measured Sharpe / max DD / hit rate per signal source over 2010-2024 daily, regime-split at COVID
-2. **Tachyon matching engine shipped** — C++17 order book with submit/cancel/crossing, FIFO, real test coverage, measured throughput + latency
-3. **NeetCode 75+ deeply solved** — not 150 grinded, 75 understood
-4. **Resume v3 finalized** — measured numbers only, behavioral STAR stories drafted, BMW infra title honest
-5. **Referral pipeline of 5-10 warm contacts** — at target companies, ready for portal-open week
-6. **2-3 mock interviews completed** — to know your weak spots before they cost a real loop
-
-**Then in August: apply.**
+- Working backtester over yfinance daily bars, **2010-2024** (14 years)
+- **Measured Sharpe, max DD, hit rate, exposure** per signal source (FinBERT, VADER, quant) over pre/post-COVID regime split
+- Static results notebook (no React, no web UI)
+- README with measured numbers + honest disclosures
+- One resume bullet you can defend in an interview
 
 ---
 
-## What's IN scope
+## In scope (locked from DESIGN.md)
 
-- Meridian backtester (this repo, routine-driven on 14-yr daily yfinance data)
-- Tachyon matching engine (separate repo, your hand-coded C++)
-- NeetCode 150 — first 75 problems deeply understood
-- BMW STAR behavioral stories (3-4 strong examples)
-- Referral outreach (LinkedIn + BMW alumni network)
-- Resume v3 with measured project bullets
-- Mock interviews (pramp.com, friends, or interviewing.io free tier)
+- Strategy ABC with injected signal source
+- Next-bar-open fill + 5 bps slippage
+- yfinance daily bars, 2010-2024
+- Jan 2010 OEX universe (100 names) held constant
+- Equal-weight position sizing, max N concurrent
+- Sharpe / max DD / hit rate / avg win-loss / exposure / CAGR per signal
+- Pre/post-COVID regime split (cut at 2020-03-01)
+- SPY buy-and-hold benchmark
+- Static notebook + HTML export
 
-## What's NOT in scope (do NOT add)
+## Not in scope (do NOT add)
 
-- Linear Algebra self-study (Strang) — defer to fall semester
-- FSU research re-engagement — only if you actually contact the professor AND do 6+ weeks of real work; otherwise stays off resume
-- React dashboard for Meridian — locked plan rule
-- Live trading on Meridian — paper mode through August
-- Tachyon FIX/wire protocol, market orders v1, multi-strategy framework — locked plan rule
-- Quant brain-teaser prep — quant interviews deferred to mid-career
-- NeetCode 150+250 "hardest" tier — Gemini called it delusional, agreed
-- Any new feature in either project beyond locked DESIGN.md spec
+- React or any web UI
+- Live trading or paper-broker integration
+- Tachyon integration (separate Tachyon roadmap; integrate only if Tachyon comfortably ahead at end of June)
+- Options pricing, factor models, multi-strategy frameworks
+- Vol-targeted position sizing (deferred to fall)
+- Sector / concentration limits (deferred to fall)
+- Custom indicator framework — `ta` library covers 90%
+- Twitter / Discord / new signal sources
 
 ---
 
-## Decisions due (with hard deadlines)
+## Decisions due (Meridian-only)
 
 | Decision | Deadline | Status |
 |---|---|---|
-| Historical news data for sentiment (Phase 2.4 in backtest/TODO.md) — pay Polygon, use GDELT, or skip sentiment | **2026-05-31** | open |
-| Linear Algebra path: FSU summer class registration OR self-study commitment OR explicit defer to fall | **2026-06-01** | open |
-| Referral target list — 10 named companies + 2 contacts each | **2026-05-31** | open |
-| Tachyon-vs-Meridian integration: ship integrated or as two standalones? | **2026-06-30** (decision gate at Tachyon progress check) | open |
-| Compute Sharpe / max DD on existing live trade logs (overdue from prior plan, doesn't need backtester done) | **2026-05-22** | open |
-| Resume v3 first draft with measured Meridian numbers | **2026-06-30** | open |
+| **Sharpe / max DD on existing live trade logs** (data exists in `logs/`, overdue from prior plan) | 2026-05-22 | open |
+| **Historical news data for sentiment** (Phase 2.4) — pay Polygon, use GDELT, skip sentiment entirely, or use subset window | 2026-05-31 | open |
+| **Position sizing N** — max concurrent positions per strategy (currently TBD, typically 5-15) | 2026-06-05 | open |
+| **Tachyon integration ON/OFF** — only if Tachyon clears its own milestone | 2026-06-30 | open |
+| **Resume bullet draft with measured Meridian Sharpe** | 2026-07-15 | open |
 
 ---
 
-## Week-by-week
+## Phases
 
-### Week 1 — May 15-22
-
-**Theme:** Data layer pivot lands. Backtester through Phase 0.
+### Phase 0 — Bootstrap (May 15 → May 22)
 
 - `[routine]` 0.1-v2: yfinance daily fetcher overwrites `backtest/data.py`
-- `[routine]` 0.2-v2: `UNIVERSE_2010` (Jan 2010 OEX) overwrites `backtest/universe.py`
-- `[you]` Tachyon: project scaffolding committed (repo init, build system, README skeleton)
-- `[you]` NeetCode: solve 5 problems (arrays + hashmaps). Don't grind — understand.
-- `[you]` Send 2 LinkedIn DMs to BMW alumni / FSU CS grads at target companies
-- `[you]` **Compute Sharpe + max DD on live bot trade logs** — overdue, data already exists in `logs/`
+- `[routine]` 0.2-v2: `UNIVERSE_2010` overwrites `backtest/universe.py`
+- `[you]` Read both recap files. Confirm the yfinance fetcher matches spec. Push back via TODO.md edits if not.
+- `[you]` Compute Sharpe + max DD on `logs/` live trade history (overdue, doesn't need backtester)
 
-**End-of-week check (Fri May 22):**
-- [ ] Routine has produced at least 4 recap files (one per run)
-- [ ] yfinance daily data is verified to load
-- [ ] 5 NeetCode problems done
-- [ ] Live trade log metrics computed
-- [ ] 2 referral DMs sent
+**Milestone (Fri May 22):** Can load yfinance data for the full UNIVERSE_2010 over 2010-2024 without errors. Live-bot metrics computed.
 
 ---
 
-### Week 2 — May 22-29
+### Phase 1 — Engine (May 22 → Jun 5)
 
-**Theme:** Backtester Phase 1 (engine + fills + metrics). Tachyon core begins.
+- `[routine]` 1.1 Strategy ABC + Order/Position/Portfolio dataclasses
+- `[routine]` 1.2 Fill model (next-bar-open + 5 bps slippage)
+- `[routine]` 1.3 Engine event loop
+- `[routine]` 1.4 Metrics module (Sharpe + Sharpe SE, max DD, hit rate, exposure, CAGR)
+- `[you]` Read each recap. The engine is the load-bearing piece — read 1.3 carefully and verify the equity accounting is correct.
 
-- `[routine]` 1.1 Strategy ABC, 1.2 fills, 1.3 engine event loop, 1.4 metrics — all 4 should land this week
-- `[you]` Tachyon: `submit()` + `cancel()` + `best_bid()` + `best_ask()` working
-- `[you]` NeetCode: 6 more problems (target cumulative: 10-12)
-- `[you]` 3 more referral DMs (cumulative: 5)
-- `[you+me]` Decision call: historical news data for sentiment (deadline approaching)
-
-**End-of-week check:**
-- [ ] Backtester can run a NoopStrategy over a date range without errors
-- [ ] Tachyon submit/cancel passing your first unit test
-- [ ] NeetCode cumulative: 10+
-- [ ] Cumulative referrals: 5
+**Milestone (Fri Jun 5):** NoopStrategy runs over 1 year of data, equity stays flat (no trades), no NaN in equity curve. Metrics module passes unit tests on known synthetic series.
 
 ---
 
-### Week 3 — May 29 - Jun 5
+### Phase 2 — Signals + sentiment data decision (Jun 5 → Jun 19)
 
-**Theme:** Quant signal wrapper. Sentiment data decision resolved. First mock.
+- `[routine]` 2.1 Quant signal wrapper (wraps `backend/trading/quant/{momentum, mean_reversion, regime_detector}`)
+- `[routine]` 2.4 hits the sentiment-data blocker — produces a recap proposing options
+- `[you+me]` Resolve 2.4: pay Polygon ($), GDELT (messy free), skip sentiment, or subset window
+- `[routine]` 2.2 VADER wrapper (or `[blocked]` and skip)
+- `[routine]` 2.3 FinBERT wrapper (or `[blocked]` and skip)
 
-- `[routine]` 2.1 quant signal wrapper (wraps existing `backend/trading/quant/`)
-- `[routine]` 2.4 sentiment data — proceeds or blocks per decision from Week 2
-- `[you]` Tachyon: crossing + FIFO matching, partial fills
-- `[you]` NeetCode: 8 problems (cumulative: 18-20)
-- `[you]` **1 mock interview** (pramp.com or friend)
-- `[you+me]` Linear Algebra decision finalized
-
-**End-of-week check:**
-- [ ] Quant signal runs against backtester data
-- [ ] Tachyon: 2 orders can cross and match correctly
-- [ ] First mock done — note 3 weak areas
-- [ ] LA path decided
+**Milestone (Fri Jun 19):** Quant signal produces buy/sell signals over backtest data. Sentiment data path is decided and committed to DESIGN.md.
 
 ---
 
-### Week 4 — Jun 5-12
+### Phase 3 — End-to-end + comparison (Jun 19 → Jul 3)
 
-**Theme:** First end-to-end backtest. Tachyon hardening.
+- `[routine]` 3.1 Quant strategy end-to-end run, full window + regime split
+- `[routine]` 3.2 VADER strategy run (if 2.4 unblocked)
+- `[routine]` 3.3 FinBERT strategy run (if 2.4 unblocked)
+- `[routine]` 3.4 Comparison notebook — equity curves overlaid, metrics tables, regime breakdowns
+- `[routine]` 3.5 README v1 with results + disclosures from DESIGN.md
+- `[you]` Read the comparison notebook carefully. The numbers in it are what go on the resume.
 
-- `[routine]` 3.1 run quant strategy end-to-end over 2010-2024
-- `[routine]` 2.2 / 2.3 sentiment wrappers if Week 3 unblocked them
-- `[you]` Tachyon: market orders + edge cases (partial fills, self-trade prevention if relevant)
-- `[you]` NeetCode: 8 problems (cumulative: 26-28)
-- `[you]` **BMW behavioral: draft 3 STAR stories** (1 conflict, 1 ambiguity, 1 impact)
-
-**End-of-week check:**
-- [ ] Quant strategy produced a real Sharpe number (good or bad — number is the point)
-- [ ] Tachyon: 5+ test cases passing
-- [ ] STAR drafts written
-- [ ] NeetCode cumulative: 25+
+**Milestone (Fri Jul 3):** Have a measurable Sharpe number per signal source. **Number is the point — good, bad, or zero, all are interview-defensible.** Quant Sharpe SHIPPING is non-negotiable; sentiment is optional if 2.4 stalled.
 
 ---
 
-### Week 5 — Jun 12-19
+### Phase 4 — Polish (Jul 3 → Jul 17)
 
-**Theme:** Mid-June checkpoint. Halfway to end-of-June ship target.
+- `[routine]` 4.1 SPY benchmark comparison (overlay equity curve, report excess Sharpe)
+- `[routine]` 4.2 Robustness checks (parameter sensitivity, walk-forward window, monte-carlo on trade ordering)
+- `[routine]` 4.3 Static HTML export of the notebook for portfolio use
+- `[you]` First draft of resume bullet using actual numbers
 
-- `[routine]` 3.2 / 3.3 sentiment strategy runs (or document as blocked)
-- `[you]` Tachyon: replay mode for deterministic testing
-- `[you]` NeetCode: 8 problems (cumulative: 33-36)
-- `[you]` **Mid-month mock interview**
-- `[you+me]` Mid-point reality check — are we on track for end-of-June ship?
-
-**End-of-week check (Fri Jun 19):**
-- [ ] Per-signal Sharpe comparison data exists for at least quant signals
-- [ ] Tachyon replay mode demonstrably working
-- [ ] Mid-June review: green / yellow / red on each project
+**Milestone (Fri Jul 17):** Pre/post-COVID Sharpes reported with standard error. SPY benchmark on equity curve plot. Resume bullet draft v1 written.
 
 ---
 
-### Week 6 — Jun 19-26
+### Phase 5 — Demo prep (Jul 17 → Jul 31)
 
-**Theme:** Polish notebook + README. Tachyon edge cases.
+- `[you]` README final polish — opening hook, results section with chart screenshots
+- `[you]` Architecture diagram drawn (Excalidraw / drawio / Mermaid)
+- `[you]` One-paragraph elevator pitch — "What is Meridian, what did you measure, what was surprising?"
+- `[you]` Resume bullet final — measured numbers only
+- `[you]` Practice the design defenses out loud: "Why daily? Why 2010 start? Why next-bar-open fill? Why this universe?"
+- `[you+me]` Final dry-run session — I pretend to be a quant interviewer and grill you on the project
 
-- `[routine]` 3.4 comparison notebook (equity curves, metrics tables, regime splits)
-- `[routine]` 3.5 README v1 with results + honest disclosures
-- `[you]` Tachyon: golden trace tests
-- `[you]` NeetCode: 8 problems (cumulative: 41-44)
-- `[you]` Resume v3 first draft with placeholder numbers
-
----
-
-### Week 7 — Jun 26 - Jul 3 (END OF PHASE 1)
-
-**Theme:** Both projects "demoable." Phase 2 (polish) begins.
-
-- `[routine]` 4.1 SPY benchmark comparison, 4.2 robustness checks
-- `[you]` Tachyon: Google Benchmark integration, measure orders/sec + p50/p99 latency
-- `[you]` NeetCode: 8 problems (cumulative: 49-52)
-- `[you]` **End-of-Phase-1 review** — are both projects demoable to a recruiter today?
-
-**End-of-week check:**
-- [ ] Meridian: notebook with equity curves + Sharpe + max DD per signal, regime split
-- [ ] Tachyon: measured orders/sec number (not aspirational)
-- [ ] Resume v3 with measured Meridian Sharpe (placeholder for Tachyon number)
+**Milestone (Fri Jul 31):** Project demoable in 5 minutes to a recruiter. Every design choice has a defensible answer. Bullet on resume.
 
 ---
 
-### Week 8 — Jul 3-10
+## Routine vs you split
 
-**Theme:** Tachyon profiling. Mock interview spike.
+- **~85% of code** → routine (twice-daily cron, sonnet-4-6 on Anthropic cloud)
+- **~10% of your time** → reading recaps, editing TODO.md to redirect, approving design changes
+- **~5% of your time** → demo materials at Phase 5 (architecture diagram, README polish, elevator pitch)
 
-- `[you]` Tachyon: `perf` profiling + cache analysis write-up
-- `[you]` Tachyon: identify and fix top 1-2 bottlenecks
-- `[you]` NeetCode: 8 problems (cumulative: 57-60)
-- `[you]` **2 mock interviews this week** — pressure-test what 60 NeetCode buys you
-- `[you+me]` Tachyon-Meridian integration call (deadline)
+**You write the resume bullet yourself. Always. Non-negotiable.**
 
 ---
 
-### Week 9 — Jul 10-17
+## Risks specific to Meridian
 
-**Theme:** Polish push.
-
-- `[you]` Tachyon: property-based / fuzz tests if time permits
-- `[you]` NeetCode: 8 problems (cumulative: 65-68)
-- `[you]` Both projects: architecture diagrams drawn
-- `[you]` Both projects: demo GIFs / videos
-
----
-
-### Week 10 — Jul 17-24
-
-**Theme:** Resume + application prep.
-
-- `[you]` Resume v3 final — measured numbers only, polished bullets
-- `[you]` Cover letter template (1-2 variants — generalist + role-specific)
-- `[you]` Target company list locked: 10 named companies + 2 referral contacts each
-- `[you]` NeetCode: 8 problems (cumulative: 73-76)
-- `[you]` **Final mock interview** with company-specific format
-
----
-
-### Week 11 — Jul 24-31 (DEADLINE WEEK)
-
-**Theme:** Ship + ready to apply.
-
-- `[you]` Confirm all referral contacts know to expect your application
-- `[you]` Final NeetCode push to 80+
-- `[you]` Both project READMEs proofread + linked from resume
-- `[you]` All resume bullets defensible — practice saying them out loud
-- `[you]` **Send first 3 applications** the moment portals open
-
----
-
-## Accountability ritual
-
-**Every Friday 8-9pm ET:** 30 min review. Open ROADMAP.md, this week's section.
-
-For each item:
-- ✅ Done — mark and move on
-- 🟡 Partial — note where you stopped, carry to next week
-- ❌ Slipped — write WHY in one sentence. Patterns matter.
-
-After the review, look at the next week's tasks. If 3+ items slipped this week, the next week is unrealistic — cut something explicitly.
-
-**Hard rule:** No silent slipping. An item is either checked or has a written reason it didn't happen. "I forgot" is not a reason; what did you do instead?
+1. **Sentiment data block (Phase 2.4)** — historical news headlines for 100 tickers over 14 years isn't free. If you skip sentiment, the project becomes "quant-signal backtester" — narrower but still shippable. Quant Sharpe is the load-bearing number.
+2. **yfinance data quality on delisted names** — UNIVERSE_2010 includes acquired/delisted tickers. `KNOWN_NO_DATA` set in universe.py covers the gaps. Spot-check 5 ticker histories before Phase 3 to make sure data quality is acceptable.
+3. **DESIGN.md churn** — May 15 had three data-layer iterations in one day (Alpaca → yfinance/2005 → yfinance/2010). The routine wasted 2 runs on dead code. **Steady spec from here.** If a 4th iteration looks tempting, the answer is probably "ship what we have."
+4. **You stop reading recaps** — black-box risk. The recap-as-learning loop only works if you actually engage with the code. Recap pile-up = project becomes indefensible. Counter: Friday review ritual catches this.
+5. **Phase 3 numbers come back ugly** — quant Sharpe at 0.0 or negative is *fine* and *still resume-worthy* if framed honestly. "Measured X signal sources, found Y had no statistically significant edge after costs" is a stronger interview story than fabricated returns.
 
 ---
 
@@ -243,23 +153,39 @@ After the review, look at the next week's tasks. If 3+ items slipped this week, 
 
 In order of cut-first:
 
-1. NeetCode count target (50 deep > 75 shallow)
-2. Property-based / fuzz testing on Tachyon (Week 9 polish)
-3. Resume cover letter templates (Week 10 — use a generic one)
-4. SPY benchmark + robustness checks on Meridian (Week 7 polish)
-5. Tachyon-Meridian integration (always optional)
+1. Phase 4.2 robustness checks (walk-forward, monte-carlo)
+2. Phase 4.3 static HTML export (just link the notebook on GitHub)
+3. Phase 4.1 SPY benchmark (nice-to-have, not load-bearing)
+4. Phase 2 sentiment signals (if 2.4 doesn't resolve cleanly — ship quant-only)
+5. Phase 3.5 README v1 (replace with bullet-point summary)
 
-What does NOT get cut, ever:
-- Shipping ONE measurable number per project
-- Resume v3
-- At least 1 mock interview before Aug 1
-- Referral list of 10 companies
+**Does NOT get cut, ever:**
+
+- Phase 1 (engine + fills + metrics) — without these, there's no backtester at all
+- Phase 3.1 quant strategy end-to-end run with a measured Sharpe
+- Phase 5 README + elevator pitch (5 min of demo > nothing)
+- One defensible resume bullet
+
+---
+
+## Friday review
+
+End of each week, open this doc, scan the current phase. For each line item:
+
+- ✅ Done — mark and move on
+- 🟡 In progress — note state, carry to next week
+- ❌ Slipped — write WHY in one sentence. Patterns matter.
+- ⛔ Blocked — note what's needed to unblock
+
+After scanning, look at next phase. If 2+ items slipped this week, current phase milestone is probably going to slip by 1 week — explicitly acknowledge that, don't pretend.
+
+**Hard rule:** No silent slipping. Item is either checked or has a written reason it didn't happen.
 
 ---
 
 ## Related docs
 
-- `backtest/DESIGN.md` — Meridian backtester locked spec
-- `backtest/TODO.md` — routine's task queue for Meridian
-- `journal/*.md` — routine recap files (read these to learn what was built)
-- Memory: `project_swe_portfolio_plan.md`, `project_meridian_routine_execution_model.md`
+- `backtest/DESIGN.md` — locked spec (yfinance daily 2010-2024, UNIVERSE_2010, next-bar-open + 5bps, etc.)
+- `backtest/TODO.md` — routine's ordered task queue
+- `journal/*.md` — routine recap files (read these — recap is the contract)
+- Memory: `project_meridian_routine_execution_model.md` (routine setup + why), `project_swe_portfolio_plan.md` (broader August strategy)
