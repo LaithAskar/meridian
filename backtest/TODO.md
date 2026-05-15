@@ -8,34 +8,45 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 0 — Bootstrap (do these first, in order)
 
-- [done] **0.1 — Data infra: Alpaca historical bar fetcher with parquet cache.**
-  - File: `backtest/data.py`
-  - Function: `fetch_bars(symbols: list[str], start: date, end: date, timeframe='1Hour') -> pd.DataFrame`
-  - Cache layer: parquet at `data/cache/{symbol}_{timeframe}.parquet`. If cached file covers requested range, skip API call.
-  - Use alpaca-py (already in requirements.txt — verify) with `StockHistoricalDataClient`. IEX feed is free tier default.
-  - Tests: pull a known symbol (AAPL), verify shape, verify cache hit on second call. Use a tiny date range for test speed.
-  - Acceptance: can call `fetch_bars(['AAPL', 'MSFT'], date(2024, 1, 1), date(2024, 1, 31))` and get a multi-index DataFrame back without errors.
+**MAJOR PIVOT 2026-05-15 (later in the day):** Laith switched data source from Alpaca hourly 2016-2024 to **yfinance daily 2005-2024** with a **2005-era OEX universe**. Reasons: (a) cloud routine has no Alpaca creds and can't accept env-var secrets, (b) 19-year window with full survivorship-bias-free universe is more rigorous than 9-year + 2016-selected universe, (c) yfinance is keyless and the routine can fetch it directly. Items 0.1, 0.2, 0.2.5, 0.3 below are obsolete — the routine has new equivalents 0.1-v2, 0.2-v2 to do. See DESIGN.md for the locked spec.
 
-- [done] **0.2 — Universe definition: top-100 most liquid US equities by Jan 2016 mcap.**
-  - File: `backtest/universe.py`
-  - Hardcode the list in the file (do not pull at runtime — list is held constant per design doc).
-  - Source: research the top-100 S&P constituents by market cap as of 2016-01-01. If exact data unavailable, use a defensible proxy (e.g., S&P 100 OEX constituents as of 2016-01) and document the choice in a docstring.
-  - Export: `UNIVERSE_2016: list[str]`
-  - Tests: assert len == 100, assert all uppercase tickers, assert no duplicates.
+- [obsolete] **0.1 — (Alpaca hourly fetcher)** — replaced by 0.1-v2 yfinance daily fetcher
+- [obsolete] **0.2 — (UNIVERSE_2016)** — replaced by 0.2-v2 UNIVERSE_2005
+- [obsolete] **0.2.5 — (verify 2016 universe vs Wikipedia)** — verification rolled into 0.2-v2 acceptance criteria
+- [obsolete] **0.3 — (verify pre-committed Alpaca bundle)** — no longer needed; yfinance fetched directly by routine, no manual download required
 
-- [ ] **0.2.5 — Verify UNIVERSE_2016 against a primary source and correct any errors.**
-  - The current list in `backtest/universe.py` was reconstructed by the routine from training-data memory, not verified against an authoritative reference. Laith flagged concerns specifically about AVGO (Broadcom may not have been in OEX in Jan 2016) and possible omissions (e.g., BAX, KMI, YUM).
-  - Use `WebFetch` to pull the Wikipedia article "S&P 100" — its "Component changes" or "Historical components" section is the most accessible primary source. Cross-reference: confirm each ticker in `UNIVERSE_2016` was a constituent on 2016-01-01, and confirm no Jan-2016 constituents are missing.
-  - For renamed tickers (FB→META, PCLN→BKNG already handled), keep the modern Alpaca-compatible ticker but document the historical name in the docstring.
-  - If the constituent list needs to change: edit `universe.py`, keep len == 100, re-run tests, and document the corrections in the recap with citations to the source URL and the specific Wikipedia revision/date you used.
-  - Acceptance: every ticker in `UNIVERSE_2016` is verified against a citable source. The docstring methodology section is updated to reflect the verification.
+- [ ] **0.1-v2 — yfinance daily bar fetcher with parquet cache.**
+  - File: `backtest/data.py` (overwrite the existing Alpaca-specific module)
+  - Function: `fetch_bars(symbols: list[str], start: date, end: date, interval: str = '1d') -> pd.DataFrame`
+  - Returns a MultiIndex (symbol, date) DataFrame with columns `open, high, low, close, volume`. Use `yf.download(...)` with `auto_adjust=True` (total-return semantics — DESIGN.md requires this).
+  - Cache layer: parquet at `data/cache/{symbol}_{interval}.parquet`. Cache check: if file exists and date index covers [start, end], read locally; otherwise re-fetch full range and overwrite.
+  - Rate-limit: yfinance is unofficially rate-limited. Use the `threads=False` arg on `yf.download` and pace at ~5 symbols/sec. Retry once on Yahoo's "rate limited" string in the warning output.
+  - Remove the old `alpaca-py` dependency from `requirements.txt`, add `yfinance>=0.2.40`.
+  - Delete the old Alpaca-specific helpers (`_make_client`, `_get_timeframe`, `_fetch_from_api`) and their associated tests.
+  - Tests (overwrite `backtest/tests/test_data.py`): use a `monkeypatch` on `yf.download` to return a synthetic DataFrame so tests don't hit the network. Cover: MultiIndex shape, expected columns, cache hit count = 0 on second call, cache file created, date filter applied, empty symbols list returns empty DataFrame, no NaN in OHLC.
+  - Acceptance: `fetch_bars(['AAPL', 'MSFT'], date(2024, 1, 1), date(2024, 1, 31))` returns a non-empty MultiIndex DataFrame with the expected columns. All tests green.
+  - (`backtest/scripts/bulk_download.py` was already deleted manually as part of this pivot — no action needed on it.)
 
-- [ ] **0.3 — Verify the pre-committed data bundle.**
-  - **Context update (2026-05-15):** Original Phase 0.3 was a bulk-download script. That required `ALPACA_API_KEY` in the cloud agent's env, which the `/schedule` routine config doesn't support. Laith is downloading the data locally and committing/pushing the parquet cache to the repo himself.
-  - Task: verify the committed cache. List parquet files under `data/cache/`. Confirm there is one file per ticker in `UNIVERSE_2016`. For 3 random symbols, load the parquet and assert: (a) timestamp index spans at least 2016-01-01 → 2024-12-31, (b) row count is reasonable (≈9 yr × 250 trading days × 6.5 hr ≈ 14k rows; allow ±30% for partial-history tickers), (c) no NaN in OHLCV columns, (d) timestamps are tz-aware UTC.
-  - If `data/cache/` is empty or partial: mark `[blocked: waiting for Laith to commit parquet bundle]`, write a recap noting which symbols are missing, and skip to Phase 1.
-  - If the cache is complete: mark `[done]`, write a recap with the spot-check results, move to Phase 1.
-  - Do NOT attempt to fetch missing data from Alpaca — the routine has no credentials. Block instead.
+- [ ] **0.2-v2 — UNIVERSE_2005: Jan 2005 S&P 100 (OEX) constituents, held constant, including bankrupt/delisted names.**
+  - File: `backtest/universe.py` (overwrite the existing `UNIVERSE_2016` module)
+  - Export: `UNIVERSE_2005: list[str]` — 100 tickers.
+  - Source: use `WebFetch` to read the Wikipedia article "S&P 100" (https://en.wikipedia.org/wiki/S%26P_100) → "Component changes" / historical members section. Reconstruct the Jan 2005 constituent list. If the article doesn't give a clean 2005 snapshot, cross-check with the Wayback Machine for an archived OEX holdings page from early 2005.
+  - **Critical:** include names that subsequently failed or were absorbed. Document each in the docstring with the event and date. Examples to specifically check:
+    - LEH (Lehman Brothers — bankrupt Sep 2008)
+    - BSC (Bear Stearns — acquired by JPM Mar 2008)
+    - WB / WAMU / WM-as-Washington-Mutual (Washington Mutual — bankrupt Sep 2008)
+    - WB (Wachovia — acquired by Wells Fargo 2008)
+    - TWX (Time Warner — split/acquired multiple times)
+    - AOL (Time Warner pre-spinoff)
+    - BUD (Anheuser-Busch — acquired by InBev 2008)
+    - F, GM (pre-bankruptcy GM was GM old; new GM IPO'd 2010 with same ticker)
+    - C (Citigroup — survived but had ticker continuity through 1-for-10 reverse split 2011)
+    - AIG (survived but had near-death + reverse split)
+    - For each: confirm yfinance has data through the event date. Note which tickers have NO data at all (yfinance may have dropped the most ancient bankruptcies).
+  - For tickers that have NO yfinance data: do NOT silently drop. Add a `KNOWN_NO_DATA: set[str]` constant in the module listing them. The engine (Phase 1.3) will need to know these names should be skipped at runtime.
+  - For renamed/acquired entities with surviving tickers (e.g., META-was-FB if applicable, BKNG-was-PCLN if applicable for 2005 — verify whether these were 2005 OEX members), use the modern ticker IF the entity continued. Document the rename in the docstring.
+  - Tests (overwrite `backtest/tests/test_universe.py`): assert `len(UNIVERSE_2005) == 100`, all uppercase, no duplicates. Additionally: for 10 randomly-sampled tickers, attempt `yf.download(ticker, start='2005-01-01', end='2005-12-31', progress=False)` and verify the result is non-empty OR the ticker is in `KNOWN_NO_DATA`. (Use a mock if running offline; document in the test.)
+  - Acceptance: every ticker in `UNIVERSE_2005` is either fetchable for at least the 2005 calendar year or explicitly listed in `KNOWN_NO_DATA` with rationale. Docstring documents the methodology, primary source URL, and date of verification.
 
 ## Phase 1 — Engine
 
@@ -59,8 +70,9 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 - [ ] **1.4 — Metrics module.**
   - File: `backtest/metrics.py`
-  - Functions: `sharpe(returns, freq='hourly')`, `max_drawdown(equity_curve)`, `hit_rate(trades)`, `avg_win_loss(trades)`, `exposure(positions_over_time)`, `cagr(equity_curve, years)`.
-  - Frequency annualization: hourly → multiply by sqrt(252 * 6.5) for Sharpe.
+  - Functions: `sharpe(returns, freq='daily')`, `max_drawdown(equity_curve)`, `hit_rate(trades)`, `avg_win_loss(trades)`, `exposure(positions_over_time)`, `cagr(equity_curve, years)`.
+  - Frequency annualization: **daily → multiply by sqrt(252) for Sharpe** (per DESIGN.md after the yfinance pivot — NOT the sqrt(252*6.5) hourly factor from the earlier draft).
+  - Also implement `sharpe_se(returns)` — standard error of the Sharpe estimate, ≈ sqrt((1 + sharpe^2/2) / n) where n = number of return observations. Report alongside the point estimate so the regime-split comparison can show whether the difference is statistically meaningful.
   - Tests: known synthetic series → known metric values. Sharpe of all-zero returns = 0. Max DD of monotonic increase = 0. Etc.
 
 ## Phase 2 — Signal wrappers
