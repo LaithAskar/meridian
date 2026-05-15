@@ -101,9 +101,9 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 ## Phase 3 — Run + report
 
 - [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance — see journal/2026-05-15-pm9.md for options] **3.1 — Run quant strategy end-to-end over full window.**
-- [ ] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
-- [ ] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
-- [ ] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
+- [blocked: depends on 2.4 resolution — no historical news data source available] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
+- [blocked: depends on 2.4 resolution — no historical news data source available] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
+- [done] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
 - [ ] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
