@@ -8,7 +8,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 0 — Bootstrap (do these first, in order)
 
-**MAJOR PIVOT 2026-05-15 (later in the day):** Laith switched data source from Alpaca hourly 2016-2024 to **yfinance daily 2005-2024** with a **2005-era OEX universe**. Reasons: (a) cloud routine has no Alpaca creds and can't accept env-var secrets, (b) 19-year window with full survivorship-bias-free universe is more rigorous than 9-year + 2016-selected universe, (c) yfinance is keyless and the routine can fetch it directly. Items 0.1, 0.2, 0.2.5, 0.3 below are obsolete — the routine has new equivalents 0.1-v2, 0.2-v2 to do. See DESIGN.md for the locked spec.
+**PIVOT 2026-05-15 (later in the day, finalized after a 2nd iteration):** Laith switched data source from Alpaca hourly 2016-2024 to **yfinance daily 2010-2024** with a **Jan 2010 OEX universe**. Reasons: (a) cloud routine has no Alpaca creds and can't accept env-var secrets, (b) yfinance is keyless and the routine can fetch it directly with no manual download step, (c) 14-year window with a Jan-2010 universe is the cleanest survivorship-bias-free play that avoids the 2008-09 carnage (LEH, BSC, WaMu, Wachovia all gone by Jan 2010). Earlier in the day we considered a 2005 start; rejected because the universe complexity (yfinance gaps on bankrupt 2008-era names) outweighed the marginal Sharpe-SE benefit of 5 extra years. Items 0.1, 0.2, 0.2.5, 0.3 below are obsolete — see 0.1-v2, 0.2-v2. DESIGN.md is the source of truth.
 
 - [obsolete] **0.1 — (Alpaca hourly fetcher)** — replaced by 0.1-v2 yfinance daily fetcher
 - [obsolete] **0.2 — (UNIVERSE_2016)** — replaced by 0.2-v2 UNIVERSE_2005
@@ -27,26 +27,23 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Acceptance: `fetch_bars(['AAPL', 'MSFT'], date(2024, 1, 1), date(2024, 1, 31))` returns a non-empty MultiIndex DataFrame with the expected columns. All tests green.
   - (`backtest/scripts/bulk_download.py` was already deleted manually as part of this pivot — no action needed on it.)
 
-- [ ] **0.2-v2 — UNIVERSE_2005: Jan 2005 S&P 100 (OEX) constituents, held constant, including bankrupt/delisted names.**
+- [ ] **0.2-v2 — UNIVERSE_2010: Jan 2010 S&P 100 (OEX) constituents, held constant, including any names that later delisted.**
   - File: `backtest/universe.py` (overwrite the existing `UNIVERSE_2016` module)
-  - Export: `UNIVERSE_2005: list[str]` — 100 tickers.
-  - Source: use `WebFetch` to read the Wikipedia article "S&P 100" (https://en.wikipedia.org/wiki/S%26P_100) → "Component changes" / historical members section. Reconstruct the Jan 2005 constituent list. If the article doesn't give a clean 2005 snapshot, cross-check with the Wayback Machine for an archived OEX holdings page from early 2005.
-  - **Critical:** include names that subsequently failed or were absorbed. Document each in the docstring with the event and date. Examples to specifically check:
-    - LEH (Lehman Brothers — bankrupt Sep 2008)
-    - BSC (Bear Stearns — acquired by JPM Mar 2008)
-    - WB / WAMU / WM-as-Washington-Mutual (Washington Mutual — bankrupt Sep 2008)
-    - WB (Wachovia — acquired by Wells Fargo 2008)
-    - TWX (Time Warner — split/acquired multiple times)
-    - AOL (Time Warner pre-spinoff)
-    - BUD (Anheuser-Busch — acquired by InBev 2008)
-    - F, GM (pre-bankruptcy GM was GM old; new GM IPO'd 2010 with same ticker)
-    - C (Citigroup — survived but had ticker continuity through 1-for-10 reverse split 2011)
-    - AIG (survived but had near-death + reverse split)
-    - For each: confirm yfinance has data through the event date. Note which tickers have NO data at all (yfinance may have dropped the most ancient bankruptcies).
-  - For tickers that have NO yfinance data: do NOT silently drop. Add a `KNOWN_NO_DATA: set[str]` constant in the module listing them. The engine (Phase 1.3) will need to know these names should be skipped at runtime.
-  - For renamed/acquired entities with surviving tickers (e.g., META-was-FB if applicable, BKNG-was-PCLN if applicable for 2005 — verify whether these were 2005 OEX members), use the modern ticker IF the entity continued. Document the rename in the docstring.
-  - Tests (overwrite `backtest/tests/test_universe.py`): assert `len(UNIVERSE_2005) == 100`, all uppercase, no duplicates. Additionally: for 10 randomly-sampled tickers, attempt `yf.download(ticker, start='2005-01-01', end='2005-12-31', progress=False)` and verify the result is non-empty OR the ticker is in `KNOWN_NO_DATA`. (Use a mock if running offline; document in the test.)
-  - Acceptance: every ticker in `UNIVERSE_2005` is either fetchable for at least the 2005 calendar year or explicitly listed in `KNOWN_NO_DATA` with rationale. Docstring documents the methodology, primary source URL, and date of verification.
+  - Export: `UNIVERSE_2010: list[str]` — 100 tickers.
+  - Source: use `WebFetch` to read the Wikipedia article "S&P 100" (https://en.wikipedia.org/wiki/S%26P_100) → "Component changes" / historical members section. Reconstruct the Jan 2010 constituent list. If the article doesn't give a clean snapshot, cross-check with the Wayback Machine for archived OEX holdings from early 2010 (e.g., the iShares OEF ETF holdings page archived from Jan-Feb 2010).
+  - The 2010 universe is much cleaner than 2005 — the worst 2008-09 bankruptcies (LEH, BSC, WaMu, Wachovia) are already excluded by the Jan 2010 start. But some names did delist or get acquired during 2010-2024. Check explicitly:
+    - Renamed tickers (FB→META in Oct 2022, PCLN→BKNG in May 2018 — if they were 2010 OEX members, use the modern ticker)
+    - Sprint (S) — merged into T-Mobile Apr 2020
+    - Time Warner (TWX) — acquired by AT&T Jun 2018
+    - DuPont/Dow (DD, DOW) — DowDuPont merger 2017 then 3-way split 2019; messy ticker history
+    - DD (DuPont de Nemours, post-2019) vs DD (old DuPont, pre-2017) — confirm yfinance ticker continuity
+    - Allergan (AGN) — acquired by AbbVie 2020
+    - Monsanto (MON) — acquired by Bayer 2018 (no longer trades in US)
+    - Any other 2010-OEX names that subsequently delisted entirely
+  - For tickers that have NO yfinance data over their 2010-event-date window: add `KNOWN_NO_DATA: set[str]` constant. Phase 1.3 engine treats these as "no position." Expect this set to be SMALL (likely 0-3 tickers) given the post-2010 era.
+  - For renamed entities with surviving tickers: use the modern ticker if economic continuity exists. Document the rename + date in the module docstring.
+  - Tests (overwrite `backtest/tests/test_universe.py`): assert `len(UNIVERSE_2010) == 100`, all uppercase, no duplicates. Additionally: for 10 randomly-sampled tickers, attempt a yfinance fetch covering 2010-01-01 → 2010-12-31 (mock the call if running offline) and verify the result is non-empty OR the ticker is in `KNOWN_NO_DATA`.
+  - Acceptance: every ticker in `UNIVERSE_2010` is either fetchable starting Jan 2010 or explicitly listed in `KNOWN_NO_DATA` with rationale. Docstring documents the methodology, primary source URL, and date of verification.
 
 ## Phase 1 — Engine
 

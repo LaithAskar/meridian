@@ -23,7 +23,7 @@ backtest/
     finbert.py         # wraps backend/trading/sentiment_engine.py (FinBERT path)
     vader.py           # wraps backend/trading/sentiment_engine.py (VADER path)
     quant.py           # wraps backend/trading/quant/{momentum, mean_reversion, regime_detector}
-  universe.py          # top-100 by 2005-01 mcap (Jan 2005 OEX), held constant
+  universe.py          # top-100 by 2010-01 mcap (Jan 2010 OEX), held constant
   results/
     finbert/           # per-run outputs
     vader/
@@ -42,9 +42,9 @@ data/
 | Fill model | Next-bar-open + 5 bps slippage each side | Standard quant convention. Models execution latency. Close-price fills are amateurish |
 | Granularity | **Daily bars** | yfinance hourly only spans ~730 days. Daily is the standard quant-backtest granularity. Sentiment becomes a daily-level signal ("EOD net sentiment → next day's open"). |
 | Data source | **yfinance** (no API key required) | Free, no credentials required by the cloud routine. Caveats: known issues with adjusted-close vs unadjusted handling, occasional gaps on illiquid/delisted names, dividend treatment varies. Use `auto_adjust=True` for total-return semantics. |
-| Date range | **2005-01-01 → 2024-12-31** | 19 years. Sharpe SE ≈ 0.23 over full window. Includes 2008-09 financial crisis and 2020 COVID crash — two regime-defining tail events |
-| Regime splits | (a) Pre-financial-crisis: 2005-01-01 → 2007-12-31. Crisis + recovery: 2008-01-01 → 2015-12-31. Modern + COVID: 2016-01-01 → 2024-12-31. (b) Or a simpler pre/post-COVID cut at 2020-03-01. Report both | Two crisis events justify multi-regime reporting. Simpler binary split available for the bullet headline number |
-| Universe | **Top-100 most liquid US equities by Jan 2005 market cap (S&P 100 / OEX constituents as of Jan 2005), held constant** including names that subsequently went bankrupt, were acquired, or delisted | Real survivorship-bias-free universe. Includes LEH, BSC, WM, AOL-TWX-era names. Returns on delisted/bankrupt names are taken as -100% (post-event) and the engine carries no position past the event |
+| Date range | **2010-01-01 → 2024-12-31** | 14 years. Sharpe SE ≈ 0.27 over full window. Captures post-financial-crisis era + 2020 COVID crash. Starts after the worst 2008-09 carnage to keep the universe clean — Lehman/Bear/WaMu/Wachovia all gone by Jan 2010 |
+| Regime splits | Pre-COVID: 2010-01-01 → 2020-02-29. Post-COVID: 2020-03-01 → 2024-12-31. Report both halves separately | Standard regime check. Two ~5-7 year halves with Sharpe SE ≈ 0.35 each |
+| Universe | **Top-100 most liquid US equities by Jan 2010 market cap (S&P 100 / OEX constituents as of Jan 2010), held constant** including names that subsequently went bankrupt, were acquired, or delisted | Real survivorship-bias-free universe. Cleaner than a 2005 universe (no LEH/BSC/WaMu chaos) but still honest about delistings during 2010-2024 (e.g., SLM, ALL-renames, certain media/retail collapses). Returns on delisted names recorded at acquisition price or -100% if bankruptcy |
 | Costs | 5 bps slippage per side. $0 commission | Models adverse selection. Commissions actually zero on modern brokers |
 | Position sizing | Equal-weight, max N positions concurrent (N = TBD by signal source, typically 5-15) | Matches live bot's flat-5%-per-trade behavior — but normalized for backtest |
 | Risk halts in backtest? | No — backtester measures raw signal edge | Risk halts are a layer ON TOP of edge. Measure edge first, layer halts after |
@@ -74,9 +74,9 @@ data/
 ## Honest disclosures (for README + interview)
 
 1. Daily bars from yfinance — known data-quality caveats: adjusted-close handling may differ for stocks with complex corporate actions; occasional gaps on illiquid/delisted names; dividend treatment varies. Spot-check accordingly.
-2. 5 bps slippage assumption is a stylized number; actual slippage varies by ticker liquidity and historical era (pre-decimalization 2001, pre-Reg-NMS 2007 had structurally different microstructure — backtest spans both).
-3. Universe is S&P 100 (OEX) constituents as of Jan 2005, held constant. Some names (Lehman Brothers, Bear Stearns, Washington Mutual, AOL Time Warner, Anheuser-Busch, others) went bankrupt or were acquired during the window. Their post-event returns are recorded honestly (acquisitions at cash price, bankruptcies at -100%, no resurrection). This is the survivorship-bias-FREE universe.
-4. No commission model because modern retail brokers (Robinhood, Alpaca, Fidelity) are commission-free. Pre-2019 commissions ($5-10 per trade) are NOT modeled — disclose this when reporting pre-2019 returns.
+2. 5 bps slippage assumption is a stylized number; actual slippage varies by ticker liquidity. The 2010-2024 era is post-Reg-NMS and post-decimalization — a single slippage assumption is more defensible here than spanning 2005-2007.
+3. Universe is S&P 100 (OEX) constituents as of Jan 2010, held constant. A handful of names were acquired or delisted during 2010-2024 (e.g., Sears, certain media/retail names). Post-event returns are recorded honestly (acquisitions at cash price, bankruptcies at -100%, no resurrection). This is the survivorship-bias-FREE universe.
+4. No commission model because modern retail brokers (Robinhood, Alpaca, Fidelity) are commission-free. Pre-2019 retail commissions ($5-10 per trade) are NOT modeled — disclose this when reporting pre-2019 returns. Institutional commissions over 2010-2018 (1-3 bps) are folded into the 5 bps slippage assumption.
 5. yfinance daily data is `auto_adjust=True` adjusted for dividends and splits (total-return semantics). Compare-to-SPY uses the same adjustment for apples-to-apples.
 
 ## Routine ownership
