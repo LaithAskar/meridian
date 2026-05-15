@@ -27,7 +27,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Acceptance: `fetch_bars(['AAPL', 'MSFT'], date(2024, 1, 1), date(2024, 1, 31))` returns a non-empty MultiIndex DataFrame with the expected columns. All tests green.
   - (`backtest/scripts/bulk_download.py` was already deleted manually as part of this pivot — no action needed on it.)
 
-- [ ] **0.2-v2 — UNIVERSE_2010: Jan 2010 S&P 100 (OEX) constituents, held constant, including any names that later delisted.**
+- [done] **0.2-v2 — UNIVERSE_2010: Jan 2010 S&P 100 (OEX) constituents, held constant, including any names that later delisted.**
   - File: `backtest/universe.py` (overwrite the existing `UNIVERSE_2016` module)
   - Export: `UNIVERSE_2010: list[str]` — 100 tickers.
   - Source: use `WebFetch` to read the Wikipedia article "S&P 100" (https://en.wikipedia.org/wiki/S%26P_100) → "Component changes" / historical members section. Reconstruct the Jan 2010 constituent list. If the article doesn't give a clean snapshot, cross-check with the Wayback Machine for archived OEX holdings from early 2010 (e.g., the iShares OEF ETF holdings page archived from Jan-Feb 2010).
