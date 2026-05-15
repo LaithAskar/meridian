@@ -74,7 +74,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 2 — Signal wrappers
 
-- [ ] **2.1 — Quant signal wrapper.**
+- [done] **2.1 — Quant signal wrapper.**
   - File: `backtest/signals/quant.py`
   - Wraps `backend.trading.quant.momentum`, `mean_reversion`, `regime_detector`. Combine via the existing `signal_aggregator.py` if its interface is bar-history-only (no live broker calls).
   - Adapt: live versions may pull from broker/cache; backtest version must take a pandas DataFrame of OHLCV history as input and produce a signal (-1/0/+1 or weighted) per symbol per timestamp.
