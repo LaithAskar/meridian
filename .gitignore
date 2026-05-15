@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+# Defensive: catch credential files that don't follow the .env convention
+*api*key*
+*secret*
+*credentials*
 
 # --- Python ---
 __pycache__/
