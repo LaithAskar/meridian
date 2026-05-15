@@ -16,7 +16,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Tests: pull a known symbol (AAPL), verify shape, verify cache hit on second call. Use a tiny date range for test speed.
   - Acceptance: can call `fetch_bars(['AAPL', 'MSFT'], date(2024, 1, 1), date(2024, 1, 31))` and get a multi-index DataFrame back without errors.
 
-- [ ] **0.2 — Universe definition: top-100 most liquid US equities by Jan 2016 mcap.**
+- [done] **0.2 — Universe definition: top-100 most liquid US equities by Jan 2016 mcap.**
   - File: `backtest/universe.py`
   - Hardcode the list in the file (do not pull at runtime — list is held constant per design doc).
   - Source: research the top-100 S&P constituents by market cap as of 2016-01-01. If exact data unavailable, use a defensible proxy (e.g., S&P 100 OEX constituents as of 2016-01) and document the choice in a docstring.
