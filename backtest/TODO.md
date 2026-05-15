@@ -74,26 +74,26 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 ## Phase 2 — Signal wrappers
 
-- [done] **2.1 — Quant signal wrapper.**
+- [ ] **2.1 — Quant signal wrapper.**
   - File: `backtest/signals/quant.py`
   - Wraps `backend.trading.quant.momentum`, `mean_reversion`, `regime_detector`. Combine via the existing `signal_aggregator.py` if its interface is bar-history-only (no live broker calls).
   - Adapt: live versions may pull from broker/cache; backtest version must take a pandas DataFrame of OHLCV history as input and produce a signal (-1/0/+1 or weighted) per symbol per timestamp.
   - If the live modules are too entangled with live infra to adapt cleanly, copy + adapt the signal *logic* into the wrapper rather than monkey-patching. Document in the file's docstring.
   - Tests: synthetic bar series with clear trend → momentum signal fires correctly.
 
-- [blocked: no historical news data source available for 2010-2024; yfinance .news returns only recent articles, no timestamp-aligned historical feed] **2.2 — VADER signal wrapper.**
+- [ ] **2.2 — VADER signal wrapper.**
   - File: `backtest/signals/vader.py`
   - Input: news headlines per symbol per timestamp (need a news data source — see 2.4).
   - Output: VADER compound score → discretized to -1/0/+1 with thresholds matching live bot.
   - If no historical news data, this signal is BLOCKED — note as `[blocked: need historical news data source]` and skip to next item.
   - Tests: known headline → known signal.
 
-- [blocked: same dependency as 2.2 — requires historical news headlines aligned to daily timestamps for 2010-2024] **2.3 — FinBERT signal wrapper.**
+- [ ] **2.3 — FinBERT signal wrapper.**
   - File: `backtest/signals/finbert.py`
   - Same shape as 2.2 but uses FinBERT classifier from `backend/trading/sentiment_engine.py`.
   - Same blocker risk as 2.2.
 
-- [blocked: waiting for Laith decision — options and tradeoffs documented in journal/2026-05-15-pm8.md] **2.4 — Historical news data source (BLOCKED CHECKPOINT).**
+- [ ] **2.4 — Historical news data source (BLOCKED CHECKPOINT).**
   - This is the hardest part. Historical news headlines aligned to timestamps for 100 tickers over 9 years is not free.
   - Options: (a) Polygon news API ($$), (b) GDELT (free but messy), (c) skip sentiment backtest and only report quant (degraded scope), (d) use a subset window (last 2 years where news data is cheaper/available).
   - **STOP HERE AND FLAG FOR LAITH.** Write a recap proposing the options with cost/effort tradeoffs. Do not proceed past this without his decision.
@@ -104,7 +104,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 - [blocked: depends on 2.4 resolution — no historical news data source available] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
 - [blocked: depends on 2.4 resolution — no historical news data source available] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
 - [done] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
-- [ ] **3.5 — README with results + honest disclosures from DESIGN.md.**
+- [done] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
 

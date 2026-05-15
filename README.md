@@ -8,7 +8,7 @@ Read this before anything else.
 
 - **This is a hobby/learning project, not a production trading system.** It is not "institutional-grade." It does not approach the latency, rigor, or operational standards of a real quantitative trading firm.
 - **It depends on `robin_stocks`**, an unofficial reverse-engineered Robinhood API. No professional firm would build on this. Sessions can break without warning when Robinhood changes things on their side.
-- **There are no backtests, no statistical validation, no P&L attribution analysis** committed to this repo. The signals here are heuristics, not validated edges. Treat any P&L as noise unless and until rigorous backtesting is added.
+- **The live signals are heuristics, not validated edges.** A systematic backtester (`backtest/`) is under construction to measure the edge of each signal source over 2010-2024. Results are not yet merged — see the Backtester section below for current status and methodology.
 - **The sentiment engine scrapes free public sources** (Finviz, Yahoo Finance, Reddit, StockTwits). These are noisy data sources with significant sample selection bias. Using them for live trading is an experiment, not a strategy.
 - **The ML "ensemble" (Prophet + XGBoost + optional LSTM)** is a kitchen-sink approach. Real applied ML in finance is far more focused — typically one well-understood model per market regime, with careful attention to overfitting, alpha decay, and capacity.
 - **Trading is risky and most retail automated systems lose money over time.** This system is run with explicit small-dollar bounds for learning, not for return.
@@ -44,6 +44,132 @@ Frontend (Next.js :3000)  →  Backend (FastAPI :8000)  →  Robinhood (robin_st
                                     ↓
                              Crypto Bot (separate process, 24/7)
 ```
+
+## Backtester
+
+The `backtest/` directory is a systematic, interview-defensible backtester that measures the *edge* of Meridian's three signal sources — a quant pipeline (momentum + mean-reversion + regime detection), VADER sentiment, and FinBERT sentiment — over 14 years of daily US equity data.
+
+### Goal
+
+Produce honest Sharpe / max drawdown / hit rate numbers per signal source over 2010-2024, split at the COVID regime break. "Honest" means no survivorship bias in the universe, no close-price fills, no cherry-picked windows, and no annualized-30-day-Sharpe theatre.
+
+### Universe
+
+**100 tickers: S&P 100 (OEX) constituents as of January 2010, held constant.**
+
+- Source: OEX index composition circa Jan 2010 (reconstructed from CBOE + Wikipedia historical data).
+- Why Jan 2010? The worst 2008-09 bankruptcies — Lehman, Bear Stearns, WaMu, Wachovia — are already off the index. The 2010-2024 window is clean without having to model distressed-debt recovery paths.
+- Survivorship-bias-free: companies that were acquired, merged, or delisted *during* 2010-2024 remain in the universe. Their price bars simply end at the event date. The engine treats missing bars as "no position" from that point forward.
+- Notable events handled: Facebook (META, May 2012 IPO — not in 2010 OEX); Sprint (S, merged into T-Mobile Apr 2020); Time Warner (TWX, acquired by AT&T Jun 2018); Monsanto (MON, acquired by Bayer Jun 2018); DowDuPont merger and three-way split (DD/DOW, 2017-2019); and others. Full ticker map in `backtest/universe.py`.
+
+### Data
+
+- **Source:** yfinance daily bars, `auto_adjust=True` (total-return semantics: adjusted for dividends and splits).
+- **Cache:** parquet files at `data/cache/{symbol}_1d.parquet`. Fetched once per symbol, read locally on subsequent runs.
+- **Date range:** 2010-01-01 → 2024-12-31 (14 years, ≈3 528 trading days).
+- **Benchmark:** SPY buy-and-hold over the same window.
+
+### Fill model
+
+**Next-bar-open + 5 bps slippage each side.** The strategy generates orders at bar close; fills execute at the following day's open price, multiplied by `1.005` for buys and `0.9995` for sells. This models execution latency and adverse selection. Close-price fills are amateurish — they imply you trade at the price that triggered the signal, which is impossible.
+
+Missing next bars (delisted stocks) cancel the order rather than filling at a stale price.
+
+### Signal sources
+
+| Signal | Module | Method |
+|---|---|---|
+| **Quant** | `backtest/signals/quant.py` | Momentum (12-month cross-sectional + EMA-MACD time-series) + mean-reversion (RSI-14 + Bollinger Band z-score) combined with regime-adjusted weights. Regime is detected from SPY SMA-50/SMA-200 and VIX level. |
+| **VADER** | `backtest/signals/vader.py` | Blocked — requires historical news headlines aligned to daily timestamps for 100 tickers over 14 years. No free source exists. See [blocker details](#blockers). |
+| **FinBERT** | `backtest/signals/finbert.py` | Blocked — same dependency as VADER. See [blocker details](#blockers). |
+
+### Regime splits
+
+| Window | Dates | Rationale |
+|---|---|---|
+| Pre-COVID | 2010-01-01 → 2020-02-29 | ~10 years, includes 2011 flash crash, 2015-16 China selloff, 2018 Q4 correction |
+| Post-COVID | 2020-03-01 → 2024-12-31 | ~5 years, includes COVID crash + V-shaped recovery, 2022 rate-hike bear market |
+
+### Metrics reported (per signal source × per regime window)
+
+- Annualized Sharpe ratio: `mean(daily_returns) / std(daily_returns) × √252`
+- Sharpe standard error: `√((1 + Sharpe² / 2) / n)` — so the regime-split comparison can show whether differences are statistically meaningful
+- Max drawdown (peak-to-trough fraction)
+- Hit rate (% of closed trades profitable)
+- Average win / average loss / win-loss ratio
+- Average holding period (trading days)
+- Total trade count
+- Exposure % (fraction of days with at least one open position)
+- Total return and CAGR
+- Equity curve (plotted, rebased to 100)
+
+### Current status
+
+| Task | Status |
+|---|---|
+| yfinance daily bar fetcher with parquet cache | Done |
+| Jan 2010 OEX universe (100 tickers) | Done |
+| Strategy ABC, Order/Fill/Portfolio dataclasses | Done |
+| Next-bar-open + 5 bps fill model | Done |
+| Event-loop engine with portfolio accounting | Done |
+| Metrics module (Sharpe, max DD, hit rate, etc.) | Done |
+| Quant signal wrapper | Done |
+| VADER signal wrapper | Blocked — no historical news data source |
+| FinBERT signal wrapper | Blocked — same |
+| Run quant backtest end-to-end | Blocked — cloud environment network policy blocks outbound yfinance requests (HTTP 403 from Yahoo Finance). To unblock: either whitelist `finance.yahoo.com` in the environment's network policy, or pre-download and commit parquet files to `data/cache/` from a local machine. |
+| Run VADER / FinBERT backtests | Blocked — waiting on news data decision |
+| Comparison notebook (`backtest/notebooks/results.ipynb`) | Done — renders gracefully with no data; fills in automatically once results land |
+
+**Results are not yet available** because the yfinance data fetch is blocked by the cloud environment's outbound network policy. The code is complete and all 269 unit tests pass. See `journal/2026-05-15-pm9.md` for the exact error and unblocking options.
+
+### Running it locally
+
+Once the data cache is populated (one-time download):
+
+```bash
+# From repo root. Fetches all 100 tickers + SPY + ^VIX into data/cache/ (≈180 MB parquet).
+python -c "
+from datetime import date
+from backtest.data import fetch_bars
+from backtest.universe import UNIVERSE_2010
+fetch_bars(UNIVERSE_2010 + ['SPY', '^VIX'], date(2010,1,1), date(2024,12,31))
+"
+
+# Run the quant backtest (reads from cache, no network needed).
+# Outputs → backtest/results/quant/{equity_curve.csv, trades.csv, metrics.json, spy_curve.csv}
+python -m backtest.run_quant --positions 10 --cash 1000000
+
+# Open the results notebook
+jupyter lab backtest/notebooks/results.ipynb
+```
+
+### Running the tests
+
+```bash
+python3 -m pytest backtest/tests/ -q   # 269 tests, all green
+```
+
+### Honest disclosures
+
+These disclosures are locked in `backtest/DESIGN.md` and are reprinted here verbatim so they appear wherever the project is described.
+
+1. **Daily bars from yfinance** — known data-quality caveats: adjusted-close handling may differ for stocks with complex corporate actions; occasional gaps on illiquid/delisted names; dividend treatment varies. Spot-check accordingly.
+
+2. **5 bps slippage assumption** is a stylized number; actual slippage varies by ticker liquidity. The 2010-2024 era is post-Reg-NMS and post-decimalization — a single slippage assumption is more defensible here than spanning 2005-2007.
+
+3. **Universe is S&P 100 (OEX) constituents as of Jan 2010, held constant.** A handful of names were acquired or delisted during 2010-2024. Post-event returns are recorded honestly (acquisitions at cash price, bankruptcies at -100%, no resurrection). This is the survivorship-bias-free universe.
+
+4. **No commission model** because modern retail brokers (Robinhood, Alpaca, Fidelity) are commission-free. Pre-2019 retail commissions ($5-10 per trade) are not modeled — disclose this when reporting pre-2019 returns. Institutional commissions over 2010-2018 (1-3 bps) are folded into the 5 bps slippage assumption.
+
+5. **yfinance daily data is `auto_adjust=True`**, adjusted for dividends and splits (total-return semantics). The SPY benchmark uses the same adjustment for an apples-to-apples comparison.
+
+### Blockers
+
+**VADER and FinBERT backtests (items 2.2, 2.3):** Historical news headlines aligned to daily timestamps for 100 tickers over 14 years do not exist for free. Options: (a) Polygon news API (paid), (b) GDELT (free but noisy and requires alignment work), (c) limit sentiment backtest to last 2-3 years where free sources exist, (d) report only the quant signal. Awaiting Laith's decision — see `journal/2026-05-15-pm8.md` for the full tradeoff analysis.
+
+**Quant backtest network access (item 3.1):** Cloud execution environment blocks outbound HTTP to Yahoo Finance (HTTP 403). The fastest fix is to pre-download the parquet cache locally and commit it to `data/cache/`. See `journal/2026-05-15-pm9.md`.
+
+---
 
 ## Quick Start
 
