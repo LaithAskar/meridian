@@ -53,7 +53,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - Define `Strategy(ABC)` with abstract `on_bar(self, ts: datetime, bars: dict[str, pd.Series], portfolio: Portfolio) -> list[Order]`.
   - Tests: instantiate a NoopStrategy subclass that always returns []. Verify type contract.
 
-- [ ] **1.2 — Fill model: next-bar-open + 5 bps slippage.**
+- [done] **1.2 — Fill model: next-bar-open + 5 bps slippage.**
   - File: `backtest/fills.py`
   - Function: `fill_order(order, next_bar) -> Fill` where Fill has (ts, symbol, side, qty, fill_price). Fill price = next_bar.open * (1 + 5e-4) for buy, * (1 - 5e-4) for sell.
   - Edge cases: handle gap-up/gap-down (just use the open price, don't try to model partial fills). If next_bar is missing (e.g., delisted), order is cancelled.
