@@ -15,7 +15,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 - [obsolete] **0.2.5 — (verify 2016 universe vs Wikipedia)** — verification rolled into 0.2-v2 acceptance criteria
 - [obsolete] **0.3 — (verify pre-committed Alpaca bundle)** — no longer needed; yfinance fetched directly by routine, no manual download required
 
-- [ ] **0.1-v2 — yfinance daily bar fetcher with parquet cache.**
+- [done] **0.1-v2 — yfinance daily bar fetcher with parquet cache.**
   - File: `backtest/data.py` (overwrite the existing Alpaca-specific module)
   - Function: `fetch_bars(symbols: list[str], start: date, end: date, interval: str = '1d') -> pd.DataFrame`
   - Returns a MultiIndex (symbol, date) DataFrame with columns `open, high, low, close, volume`. Use `yf.download(...)` with `auto_adjust=True` (total-return semantics — DESIGN.md requires this).

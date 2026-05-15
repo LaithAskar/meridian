@@ -1,78 +1,53 @@
 """
-Alpaca historical bar fetcher with parquet cache.
+yfinance daily bar fetcher with parquet cache.
 
-Credentials are read from environment variables:
-    ALPACA_API_KEY    — Alpaca key ID
-    ALPACA_SECRET_KEY — Alpaca secret key
+No API credentials required — yfinance pulls Yahoo Finance data directly.
 
-Both variables must be set for live API calls.  Tests should monkeypatch
-`_make_client` or the `StockHistoricalDataClient` constructor to avoid
-requiring real credentials.
+Design notes
+------------
+* Per-symbol download + cache: each symbol is stored as a separate parquet
+  file at data/cache/{symbol}_{interval}.parquet.  Per-symbol caching keeps
+  individual files small (~3 500 rows for 14 years of daily data) and allows
+  partial cache hits when only some symbols need refreshing.
+
+* Rate limiting: yfinance uses an unofficial Yahoo Finance API.  We serialize
+  downloads (threads=False) and pause ~0.2 s between fetches (~5 symbols/sec)
+  to stay within Yahoo's informal rate limit.  A single retry is attempted
+  when yf.download returns an empty DataFrame (the most common symptom of a
+  transient rate-limit rejection).
+
+* Column normalization: yfinance ≥ 1.x returns MultiIndex columns
+  (Price, Ticker) even for single-symbol downloads.  We flatten to the Price
+  level and lowercase to produce the uniform (open, high, low, close, volume)
+  interface that the rest of the backtester expects.
+
+* auto_adjust=True gives total-return semantics (splits + dividends baked
+  into OHLC prices) as required by DESIGN.md.
 """
 
 from __future__ import annotations
 
-import os
-from datetime import date, datetime, timezone
+import time
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import yfinance as yf
 
-# Root of the repo: two levels up from this file (backtest/data.py → repo root)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CACHE_DIR = _REPO_ROOT / "data" / "cache"
 
-# Alpaca timeframe strings that map to alpaca-py TimeFrame objects.
-_TIMEFRAME_MAP: dict[str, object] = {}  # populated lazily to avoid import-time cost
+_YF_RATE_LIMIT_PAUSE = 0.2  # seconds between fetches (~5 symbols/sec)
+_YF_RETRY_PAUSE = 1.0       # seconds before the single retry attempt
 
 
-def _get_timeframe(name: str) -> object:
-    """Return an alpaca-py TimeFrame for a string like '1Hour'."""
-    if not _TIMEFRAME_MAP:
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit  # noqa: PLC0415
-
-        _TIMEFRAME_MAP.update(
-            {
-                "1Hour": TimeFrame.Hour,
-                "1Day": TimeFrame.Day,
-                "1Min": TimeFrame.Minute,
-                "5Min": TimeFrame(5, TimeFrameUnit.Minute),
-                "15Min": TimeFrame(15, TimeFrameUnit.Minute),
-            }
-        )
-    if name not in _TIMEFRAME_MAP:
-        raise ValueError(f"Unsupported timeframe '{name}'. Supported: {list(_TIMEFRAME_MAP)}")
-    return _TIMEFRAME_MAP[name]
-
-
-def _make_client() -> object:
-    """Construct a StockHistoricalDataClient from env vars."""
-    from alpaca.data import StockHistoricalDataClient  # noqa: PLC0415
-
-    api_key = os.environ.get("ALPACA_API_KEY", "")
-    secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
-    if not api_key or not secret_key:
-        raise EnvironmentError(
-            "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set to fetch live data."
-        )
-    return StockHistoricalDataClient(api_key=api_key, secret_key=secret_key)
-
-
-def _cache_path(symbol: str, timeframe: str) -> Path:
-    return _CACHE_DIR / f"{symbol}_{timeframe}.parquet"
+def _cache_path(symbol: str, interval: str) -> Path:
+    return _CACHE_DIR / f"{symbol}_{interval}.parquet"
 
 
 def _cache_covers(path: Path, start: date, end: date) -> bool:
-    """
-    Return True when the parquet file exists and its timestamp index spans
-    at least [start, end] (inclusive on both ends).
-
-    We only check the extremes stored in the file — no gap detection.  For
-    the backtester's purpose (daily-bar completeness isn't critical; we just
-    want to avoid re-downloading the same multi-year window), this is
-    sufficient and fast (no full read required).
-    """
+    """Return True if *path* exists and its date index spans [start, end]."""
     if not path.exists():
         return False
     df = pd.read_parquet(path)
@@ -80,136 +55,147 @@ def _cache_covers(path: Path, start: date, end: date) -> bool:
         return False
 
     idx = df.index
-    # Index may be MultiIndex (symbol, timestamp) or plain DatetimeIndex.
-    if isinstance(idx, pd.MultiIndex):
-        timestamps = idx.get_level_values("timestamp")
-    else:
-        timestamps = idx
+    dates = idx.get_level_values("date") if isinstance(idx, pd.MultiIndex) else idx
 
-    # Normalise to tz-naive dates for comparison
-    first: date = pd.Timestamp(timestamps.min()).date()
-    last: date = pd.Timestamp(timestamps.max()).date()
+    first: date = pd.Timestamp(dates.min()).date()
+    last: date = pd.Timestamp(dates.max()).date()
     return first <= start and last >= end
 
 
-def _fetch_from_api(
-    symbols: list[str],
-    start: date,
-    end: date,
-    timeframe: str,
-    client: Optional[object] = None,
-) -> pd.DataFrame:
-    """Call the Alpaca API and return a (symbol, timestamp) multi-index DataFrame."""
-    from alpaca.data.enums import DataFeed  # noqa: PLC0415
-    from alpaca.data.requests import StockBarsRequest  # noqa: PLC0415
+def _download_symbol(symbol: str, start: date, end: date, interval: str) -> pd.DataFrame:
+    """
+    Call yf.download for one symbol and return a tz-naive DatetimeIndex DataFrame
+    with lowercase columns open/high/low/close/volume.
 
-    if client is None:
-        client = _make_client()
+    Retries once on an empty result (common symptom of a transient rate limit).
+    """
+    # yfinance end date is exclusive
+    end_str = (end + timedelta(days=1)).isoformat()
 
-    request = StockBarsRequest(
-        symbol_or_symbols=symbols,
-        start=datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
-        end=datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc),
-        timeframe=_get_timeframe(timeframe),
-        feed=DataFeed.IEX,
-    )
-    bar_set = client.get_stock_bars(request)
-    df: pd.DataFrame = bar_set.df
+    def _fetch() -> pd.DataFrame:
+        return yf.download(
+            symbol,
+            start=start.isoformat(),
+            end=end_str,
+            interval=interval,
+            auto_adjust=True,
+            threads=False,
+            progress=False,
+        )
 
-    # Ensure the index levels are named consistently.
-    if isinstance(df.index, pd.MultiIndex):
-        df.index.names = ["symbol", "timestamp"]
-    return df
+    raw = _fetch()
+    if raw.empty:
+        time.sleep(_YF_RETRY_PAUSE)
+        raw = _fetch()
+
+    if raw.empty:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+    # yfinance >= 1.x: columns are a (Price, Ticker) MultiIndex — flatten to Price
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+
+    raw = raw.rename(columns=str.lower)
+
+    # Keep only OHLCV; ignore adj_close, dividends, stock_splits, etc.
+    keep = [c for c in ("open", "high", "low", "close", "volume") if c in raw.columns]
+    raw = raw[keep].copy()
+
+    # Ensure tz-naive DatetimeIndex named "date"
+    if hasattr(raw.index, "tz") and raw.index.tz is not None:
+        raw.index = raw.index.tz_localize(None)
+    raw.index.name = "date"
+
+    return raw
 
 
 def fetch_bars(
     symbols: list[str],
     start: date,
     end: date,
-    timeframe: str = "1Hour",
+    interval: str = "1d",
     cache_dir: Optional[Path] = None,
-    client: Optional[object] = None,
 ) -> pd.DataFrame:
     """
-    Return hourly OHLCV bars for *symbols* over [start, end].
+    Return daily OHLCV bars for *symbols* over the inclusive window [start, end].
 
-    Return value
-    ------------
-    pd.DataFrame with a MultiIndex of (symbol, timestamp) and columns:
-        open, high, low, close, volume, trade_count, vwap
+    Returns
+    -------
+    pd.DataFrame with a MultiIndex of (symbol, date) and columns:
+        open, high, low, close, volume
 
     Caching
     -------
     Each symbol is cached independently at
-    ``data/cache/{symbol}_{timeframe}.parquet``.  On the first call the data
-    is fetched from Alpaca and written to disk.  Subsequent calls that request
-    a date range fully covered by the cached file skip the API entirely.
+    ``data/cache/{symbol}_{interval}.parquet``.
 
-    If the cache does not cover the full requested range the symbol is
-    re-fetched in full and the cache file is replaced.  (Merging partial
-    ranges would complicate the code for negligible benefit — the bulk
-    download script fetches the full 9-year window once.)
+    Cache hit: file exists and its date range covers [start, end].  The symbol
+    is read from disk without any network call.
+
+    Cache miss: symbol is fetched from Yahoo Finance, written to disk, then
+    used.  Fetches are paced at ~5 symbols/sec to stay within rate limits.
+
+    The returned DataFrame is always filtered to exactly [start, end] so that
+    a wide-range cache serving a narrow request does not leak extra rows.
 
     Parameters
     ----------
-    symbols   : list of ticker strings (uppercase)
+    symbols   : ticker strings (uppercase)
     start     : inclusive start date
     end       : inclusive end date
-    timeframe : alpaca-py timeframe name; default '1Hour'
+    interval  : yfinance interval string (default '1d' for daily)
     cache_dir : override cache directory (used in tests)
-    client    : pre-constructed StockHistoricalDataClient (used in tests)
     """
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    effective_cache = cache_dir if cache_dir is not None else _CACHE_DIR
-
-    cached_frames: list[pd.DataFrame] = []
-    symbols_to_fetch: list[str] = []
-
-    for sym in symbols:
-        path = effective_cache / f"{sym}_{timeframe}.parquet"
-        if _cache_covers(path, start, end):
-            df = pd.read_parquet(path)
-            df.index.names = ["symbol", "timestamp"]
-            cached_frames.append(df)
-        else:
-            symbols_to_fetch.append(sym)
-
-    fetched_frames: list[pd.DataFrame] = []
-    if symbols_to_fetch:
-        df_all = _fetch_from_api(symbols_to_fetch, start, end, timeframe, client=client)
-        # Split back per symbol and write individual cache files.
-        for sym in symbols_to_fetch:
-            if sym in df_all.index.get_level_values("symbol"):
-                df_sym = df_all.xs(sym, level="symbol")
-                df_sym = df_sym.copy()
-                df_sym.index = pd.MultiIndex.from_tuples(
-                    [(sym, ts) for ts in df_sym.index], names=["symbol", "timestamp"]
-                )
-                path = effective_cache / f"{sym}_{timeframe}.parquet"
-                df_sym.to_parquet(path)
-            else:
-                df_sym = pd.DataFrame()
-            fetched_frames.append(df_sym)
-
-    all_frames = cached_frames + [f for f in fetched_frames if not f.empty]
-    if not all_frames:
+    if not symbols:
         return pd.DataFrame()
 
-    result = pd.concat(all_frames).sort_index()
-    result.index.names = ["symbol", "timestamp"]
+    effective_cache = cache_dir if cache_dir is not None else _CACHE_DIR
+    effective_cache.mkdir(parents=True, exist_ok=True)
 
-    # Filter to the exact requested window in case the cache spans a wider range.
-    ts_level = result.index.get_level_values("timestamp")
-    start_ts = pd.Timestamp(start, tz="UTC")
-    end_ts = pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1)
-    mask = (ts_level >= start_ts) & (ts_level < end_ts)
+    frames: list[pd.DataFrame] = []
+    fetched_count = 0
+
+    for sym in symbols:
+        path = effective_cache / f"{sym}_{interval}.parquet"
+
+        if _cache_covers(path, start, end):
+            df_sym = pd.read_parquet(path)
+        else:
+            # Pace API calls; skip the pause before the very first fetch
+            if fetched_count > 0:
+                time.sleep(_YF_RATE_LIMIT_PAUSE)
+            df_sym = _download_symbol(sym, start, end, interval)
+            fetched_count += 1
+            if not df_sym.empty:
+                df_sym.to_parquet(path)
+
+        if df_sym.empty:
+            continue
+
+        # Guard: cached files should have a plain DatetimeIndex; skip if malformed
+        if isinstance(df_sym.index, pd.MultiIndex):
+            continue
+
+        df_sym.index.name = "date"
+
+        # Promote to (symbol, date) MultiIndex
+        df_sym = df_sym.copy()
+        df_sym.index = pd.MultiIndex.from_tuples(
+            [(sym, d) for d in df_sym.index],
+            names=["symbol", "date"],
+        )
+        frames.append(df_sym)
+
+    if not frames:
+        return pd.DataFrame()
+
+    result = pd.concat(frames).sort_index()
+
+    # Filter to the exact requested window (cache may span a wider range)
+    date_level = result.index.get_level_values("date")
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    mask = (date_level >= start_ts) & (date_level <= end_ts)
     result = result.loc[mask]
 
-    # Normalise the timestamp level to microsecond resolution.  pyarrow writes
-    # parquet with millisecond timestamps while pandas date_range defaults to
-    # seconds; coercing to a common unit avoids dtype mismatches between the
-    # cache and non-cache code paths.
-    sym_vals = result.index.get_level_values("symbol")
-    ts_vals = result.index.get_level_values("timestamp").as_unit("us")
-    result.index = pd.MultiIndex.from_arrays([sym_vals, ts_vals], names=["symbol", "timestamp"])
     return result
