@@ -65,7 +65,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
   - State recording: at each ts, snapshot (equity, cash, positions, num_positions). Save as a list of dicts → DataFrame at end.
   - Tests: run NoopStrategy over 1 month of AAPL+MSFT data. Verify equity stays at initial_cash (no trades). Verify no NaN in equity curve.
 
-- [ ] **1.4 — Metrics module.**
+- [done] **1.4 — Metrics module.**
   - File: `backtest/metrics.py`
   - Functions: `sharpe(returns, freq='daily')`, `max_drawdown(equity_curve)`, `hit_rate(trades)`, `avg_win_loss(trades)`, `exposure(positions_over_time)`, `cagr(equity_curve, years)`.
   - Frequency annualization: **daily → multiply by sqrt(252) for Sharpe** (per DESIGN.md after the yfinance pivot — NOT the sqrt(252*6.5) hourly factor from the earlier draft).
