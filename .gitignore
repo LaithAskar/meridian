@@ -51,7 +51,9 @@ models/checkpoints/
 *.sqlite
 *.sqlite3
 *.db
-data/cache/
+# data/cache/ is intentionally NOT excluded: it holds yfinance OHLCV parquet
+# files (public data) needed by the cloud backtest routine.  Trading-bot state
+# lives in backend/cache/ and backend/state/ (excluded separately below).
 crypto_bot/data/*
 !crypto_bot/data/.gitkeep
 crypto_bot/logging_/*
