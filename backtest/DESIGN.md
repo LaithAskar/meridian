@@ -83,12 +83,34 @@ data/
 
 This backtester is built by a scheduled Claude routine running twice daily. Each run reads `TODO.md`, picks the top unfinished task, executes it, writes code + tests, and produces a recap file at `journal/YYYY-MM-DD-{am|pm}.md` in the format: **task → code → explanation → output**.
 
+### Territory boundary (added 2026-05-16, council-driven)
+
+The routine's autonomous-write authority is scoped. The boundary exists because interview-defendable surfaces and bug-prone surfaces (lookahead, survivorship, annualization) overlap heavily — and an LLM routine with passing tests is not a substitute for hostile-reviewer scrutiny on those surfaces.
+
+**Routine territory (autonomous writes allowed):**
+- `backtest/data.py` — data loaders, parquet cache, network plumbing
+- `backtest/notebooks/*.ipynb` — reporting, plots, narrative glue
+- `backtest/scripts/*.py` — one-off download/utility scripts
+- `backtest/tests/test_*.py` — ADD-only; routine may add tests, never weaken or delete
+
+**Hand-built territory (Laith writes; routine MUST NOT modify without explicit per-file authorization in TODO.md):**
+- `backtest/signals/*.py` — signal evaluation logic (Phase 2.x)
+- `backtest/run_quant.py` and any future `run_*.py` integration scripts (Phase 3.x)
+- `backtest/metrics.py` — annualization constants frozen after audit
+- Any regime-split or point-in-time-join logic added beyond what Phase 1 shipped
+
+Already-shipped Phase 0/1/4 modules (`engine.py`, `fills.py`, `metrics.py`, `universe.py`) are subject to the **audit gate** in TODO.md before any further work depends on them.
+
+### Routine rules
+
 Routine MUST NOT:
 - Deviate from this design doc without first updating it AND noting the change in a recap
 - Build a web UI of any kind
 - Add scope (factor models, options pricing, etc. — see locked SWE portfolio plan)
 - Bypass the TODO order (next task is the next task)
 - Commit broken code — tests must pass before commit
+- Touch hand-built territory (see boundary above) without explicit per-file authorization in TODO.md
+- Mark an `[audit-required]` item as `[done]` — only Laith does that
 
 Routine MUST:
 - Write tests for every new module
@@ -96,3 +118,4 @@ Routine MUST:
 - Write a recap file per run
 - Use `[routine]` prefix on all commits for git-log filtering
 - Stop and flag for human decision if a task requires a judgment call not specified in this doc
+- Skip Phase 2/3 items if the audit gate in TODO.md is unresolved, and mark them `[audit-required]`

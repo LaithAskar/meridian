@@ -2,7 +2,40 @@
 
 Routine reads this top-to-bottom. Take the **top item that is neither `[done]` nor `[blocked]`** — i.e., the first `[ ]` or `[~]`. You MAY skip over `[blocked]` items to keep working, but you may NOT skip over `[ ]` or `[~]` items. Execute the chosen item, mark it `[done]` (or `[~]` if not finished, `[blocked: <reason>]` if it requires Laith input), write the recap, commit, stop. Do not bundle multiple items per run unless one truly blocks the other and the combined work fits in one session.
 
-Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[done]` completed · `[blocked: <reason>]` needs Laith input
+Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[done]` completed · `[blocked: <reason>]` needs Laith input · `[audit-required]` Laith must hostile-review before routine may touch dependent items
+
+---
+
+## AUDIT GATE — added 2026-05-16 (council-driven)
+
+**Read `backtest/REVIEW_CHECKLIST.md` before continuing past this section.**
+
+The routine has shipped Phase 0/1/4 autonomously. Before any further routine work touches signals (Phase 2) or integration runs (Phase 3), Laith must hostile-review every shipped module against the checklist. Bug classes specifically in scope: lookahead leakage, survivorship-bias gaps in universe handling, fill-on-same-bar leakage, annualization confusion, NaN propagation in metrics, point-in-time data integrity. The annualization mistake that surfaced in spec revisions (sqrt(252) vs sqrt(252*6.5)) is the canonical example of why this gate exists.
+
+**Hand-built territory (routine MUST NOT modify without explicit Laith authorization in this file):**
+- `backtest/signals/*.py` — signal evaluation logic (Phase 2.x)
+- `backtest/run_quant.py` and any future `run_*.py` integration scripts (Phase 3.x)
+- Any regime-split or point-in-time-join logic added beyond what Phase 1 shipped
+- `backtest/metrics.py` annualization constants — frozen after audit; do not edit
+
+Routine MAY still touch (scaffolding territory):
+- `backtest/data.py` data loaders and parquet cache plumbing
+- `backtest/notebooks/*.ipynb` reporting and visualization glue
+- `backtest/scripts/*.py` one-off download/utility scripts
+- `backtest/tests/test_*.py` — but only to ADD tests, never to weaken or delete existing ones
+
+If the routine hits a Phase 2 or Phase 3 task while the audit gate is unresolved, it must mark it `[audit-required]` and skip to the next eligible item or stop.
+
+### Audit checklist progress
+
+- [ ] **A.1 — Audit `backtest/engine.py`** for lookahead leakage. Confirm `on_bar(ts, bars, portfolio)` cannot access bars beyond `ts`. Confirm fills happen at `ts+1` open, not `ts` close. Run REVIEW_CHECKLIST.md §1 line-by-line.
+- [ ] **A.2 — Audit `backtest/fills.py`** for fill semantics. Confirm slippage direction is correct on both sides. Confirm missing-next-bar cancels rather than silently filling. Run REVIEW_CHECKLIST.md §2.
+- [ ] **A.3 — Audit `backtest/universe.py`** for survivorship-bias gaps. Confirm `KNOWN_NO_DATA` rationale is documented per ticker. Confirm delisted names have post-event returns recorded honestly (acquisition price or -100%), NOT dropped. Run REVIEW_CHECKLIST.md §3.
+- [ ] **A.4 — Audit `backtest/metrics.py`** annualization. Confirm `sqrt(252)` not `sqrt(252*6.5)` for daily bars. Confirm `sharpe_se` formula matches Lo's standard error. Confirm `max_drawdown` uses running maximum, not full-series maximum (the latter is a lookahead bug). Run REVIEW_CHECKLIST.md §4.
+- [ ] **A.5 — Audit `backtest/data.py`** for point-in-time integrity. Confirm `auto_adjust=True` semantics are NOT being re-applied somewhere downstream (double-adjustment is a silent silent disaster). Confirm cache reads cannot serve dates outside fetched range. Run REVIEW_CHECKLIST.md §5.
+- [ ] **A.6 — Audit existing tests** for shallowness. For each test file: does any test assert WRONG numbers would fail? (i.e., are tests just `assert result is not None`, or do they pin known values?) Run REVIEW_CHECKLIST.md §6.
+
+Each audit item: Laith reads the code, runs the checklist section, writes findings to `journal/audit-{module}.md`. If a bug is found, mark the relevant Phase task `[~]` so the routine reopens it. If clean, mark `[done]` here.
 
 ---
 
@@ -103,14 +136,16 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 - [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance. To unblock: run `python -m backtest.scripts.download_cache` locally, then `git add data/cache/ && git commit && git push`. NOTE: data/cache/ was previously in .gitignore — that entry was removed 2026-05-16. A plain `git add data/cache/` now works without --force.] **3.1 — Run quant strategy end-to-end over full window.**
 - [blocked: depends on 2.4 resolution — no historical news data source available] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
 - [blocked: depends on 2.4 resolution — no historical news data source available] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
-- [done] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
-- [done] **3.5 — README with results + honest disclosures from DESIGN.md.**
+- [blocked: depends on 3.1 — notebook scaffolding exists at `backtest/notebooks/results.ipynb` but `results/quant/equity_curve.csv` and `trades.csv` are header-only (zero data rows). Cannot claim "comparison notebook built" until at least one real run produces equity data. Previously marked [done] by routine 2026-05-16 prematurely — flipped back after Laith inventory.] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
+- [blocked: depends on 3.1 — root `README.md` is honest project-level framing but no backtester-results README exists. Cannot write "results" section without results. Previously marked [done] by routine prematurely — flipped back after Laith inventory.] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
 
-- [done] **4.1 — Add benchmark vs SPY buy-and-hold.**
-- [done] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
-- [done] **4.3 — Export static HTML of the notebook for portfolio site.**
+**STATE 2026-05-16:** Phase 4's own acceptance gate ("only if Phase 3 done by July 1") is unmet — Phase 3.1 is blocked. The routine marked 4.1–4.3 [done] anyway, in violation of this gate. All flipped back to [blocked] pending real Phase 3.1 run.
+
+- [blocked: depends on 3.1 — SPY benchmark cannot be plotted/computed without a real equity curve to benchmark against. Previously marked [done] by routine prematurely.] **4.1 — Add benchmark vs SPY buy-and-hold.**
+- [blocked: depends on 3.1 — `backtest/robustness.py` module exists with passing tests on synthetic data, but no robustness CHECKS have been run against a real strategy run. Previously marked [done] by routine prematurely.] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
+- [blocked: depends on 3.1 — `backtest/notebooks/results.html` is 8588-line scaffolding from a notebook with no real data. HTML exists but contains no actual results. Previously marked [done] by routine prematurely.] **4.3 — Export static HTML of the notebook for portfolio site.**
 
 ---
 
