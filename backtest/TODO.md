@@ -109,7 +109,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
 
 - [done] **4.1 — Add benchmark vs SPY buy-and-hold.**
-- [ ] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
+- [done] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
 - [ ] **4.3 — Export static HTML of the notebook for portfolio site.**
 
 ---
