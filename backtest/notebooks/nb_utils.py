@@ -40,14 +40,20 @@ WINDOW_LABELS: dict[str, str] = {
 }
 
 METRIC_KEYS: list[str] = [
-    "sharpe", "sharpe_se", "max_drawdown", "hit_rate",
+    "sharpe", "sharpe_se", "excess_sharpe", "max_drawdown", "hit_rate",
     "avg_win", "avg_loss", "win_loss_ratio", "avg_holding_days",
     "trade_count", "exposure", "total_return", "cagr",
+]
+
+# Metrics that a passive buy-and-hold benchmark can report (no trades).
+BENCHMARK_METRIC_KEYS: list[str] = [
+    "sharpe", "max_drawdown", "total_return", "cagr",
 ]
 
 METRIC_LABELS: dict[str, str] = {
     "sharpe":           "Sharpe",
     "sharpe_se":        "Sharpe SE",
+    "excess_sharpe":    "Excess Sharpe (vs SPY)",
     "max_drawdown":     "Max Drawdown",
     "hit_rate":         "Hit Rate",
     "avg_win":          "Avg Win ($)",
@@ -65,6 +71,7 @@ METRIC_LABELS: dict[str, str] = {
 METRIC_FORMATS: dict[str, str] = {
     "sharpe":           ".3f",
     "sharpe_se":        ".3f",
+    "excess_sharpe":    ".3f",
     "max_drawdown":     ".1%",
     "hit_rate":         ".1%",
     "avg_win":          ",.0f",
@@ -116,6 +123,31 @@ def load_spy_results(base_dir: Path) -> pd.DataFrame | None:
     if not spy_path.exists():
         return None
     return pd.read_csv(spy_path, index_col="ts", parse_dates=True)
+
+
+def load_benchmark_metrics(base_dir: Path) -> dict[str, Any] | None:
+    """
+    Load SPY benchmark metrics from backtest/results/quant/metrics.json.
+
+    Returns the ``benchmark`` sub-dict (or None if unavailable), with shape::
+
+        {
+            "name": "SPY buy-and-hold",
+            "full_window":  {"sharpe": ..., "max_drawdown": ..., "total_return": ..., "cagr": ...},
+            "pre_covid":    {...},
+            "post_covid":   {...},
+        }
+
+    ``None`` is returned when the quant run has not yet been executed, when
+    the network policy blocked the data fetch, or when the SPY data was
+    unavailable during the run.
+    """
+    metrics_path = base_dir / "quant" / "metrics.json"
+    if not metrics_path.exists():
+        return None
+    with open(metrics_path) as fh:
+        data = json.load(fh)
+    return data.get("benchmark")
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +210,7 @@ def format_metric_val(val: Any, metric: str) -> str:
 def build_metrics_comparison(
     all_results: dict[str, dict[str, Any] | None],
     window: str = "full_window",
+    benchmark: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
     """
     Build a (metric × strategy) comparison DataFrame for one window.
@@ -187,10 +220,14 @@ def build_metrics_comparison(
     all_results : {strategy_name: results_dict_or_None}
                   None entries are treated as "not available".
     window      : 'full_window', 'pre_covid', or 'post_covid'
+    benchmark   : optional SPY benchmark dict from load_benchmark_metrics().
+                  When provided, a 'SPY B&H' column is appended.  Only
+                  BENCHMARK_METRIC_KEYS are populated; trade-based rows are None.
 
     Returns
     -------
-    DataFrame indexed by metric label, columns = capitalised strategy names.
+    DataFrame indexed by metric label, columns = capitalised strategy names
+    (plus 'SPY B&H' when benchmark is supplied).
     Missing strategy data appears as None (not NaN) so callers can
     distinguish "no data" from a genuinely-zero metric.
     """
@@ -203,6 +240,10 @@ def build_metrics_comparison(
             else:
                 window_data = results.get("metrics", {}).get(window, {})
                 row[strategy.capitalize()] = window_data.get(metric)
+        if benchmark is not None:
+            window_data = benchmark.get(window, {})
+            # Only report metrics a passive benchmark can provide
+            row["SPY B&H"] = window_data.get(metric) if metric in BENCHMARK_METRIC_KEYS else None
         rows.append(row)
 
     return pd.DataFrame(rows).set_index("Metric")
@@ -210,12 +251,19 @@ def build_metrics_comparison(
 
 def regime_sharpe_df(
     all_results: dict[str, dict[str, Any] | None],
+    benchmark: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
     """
     Build a (strategy × regime) Sharpe comparison table.
 
     Returns a DataFrame with WINDOW_LABELS values as columns and capitalised
     strategy names as the index.  Blocked/missing strategies → None.
+
+    Parameters
+    ----------
+    all_results : {strategy_name: results_dict_or_None}
+    benchmark   : optional SPY benchmark dict from load_benchmark_metrics().
+                  When provided, a 'SPY B&H' row is appended for reference.
     """
     records: list[dict] = []
     for strategy, results in all_results.items():
@@ -228,5 +276,11 @@ def regime_sharpe_df(
             for wk, lbl in WINDOW_LABELS.items():
                 row[lbl] = m.get(wk, {}).get("sharpe")
         records.append(row)
+
+    if benchmark is not None:
+        spy_row: dict[str, Any] = {"Strategy": "SPY B&H"}
+        for wk, lbl in WINDOW_LABELS.items():
+            spy_row[lbl] = benchmark.get(wk, {}).get("sharpe")
+        records.append(spy_row)
 
     return pd.DataFrame(records).set_index("Strategy")

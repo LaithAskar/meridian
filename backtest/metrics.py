@@ -216,3 +216,60 @@ def avg_holding_period(trades: pd.DataFrame) -> float:
     if trades.empty:
         return float("nan")
     return float(trades["holding_days"].mean())
+
+
+def excess_sharpe(returns: pd.Series, benchmark_returns: pd.Series) -> float:
+    """
+    Annualised Sharpe of the strategy minus annualised Sharpe of the benchmark.
+
+    Positive result means the strategy outperforms on a risk-adjusted basis.
+    Uses the same sqrt(252) daily Sharpe formula for both series so the
+    comparison is apples-to-apples.
+    """
+    return sharpe(returns) - sharpe(benchmark_returns)
+
+
+def benchmark_metrics(
+    price_series: pd.Series,
+    years: float,
+) -> dict[str, float | None]:
+    """
+    Buy-and-hold performance metrics for a passive benchmark (e.g. SPY).
+
+    Returns Sharpe, max drawdown, total return, and CAGR.  Trade-based
+    metrics (hit_rate, avg_win, etc.) are not reported — they are undefined
+    for a buy-and-hold benchmark.
+
+    Parameters
+    ----------
+    price_series : daily closing prices with a DatetimeIndex.
+    years        : window length in years (used for CAGR).
+
+    Returns
+    -------
+    dict with keys: sharpe, max_drawdown, total_return, cagr.
+    All values are None if price_series is empty or years ≤ 0.
+    """
+    _empty: dict[str, float | None] = {
+        "sharpe": None, "max_drawdown": None,
+        "total_return": None, "cagr": None,
+    }
+    if price_series.empty or years <= 0:
+        return _empty
+
+    bh_returns = price_series.pct_change().dropna()
+    if bh_returns.empty:
+        return _empty
+
+    try:
+        tr = round(total_return(price_series), 4)
+        cagr_val = round(cagr(price_series, years), 4)
+    except ValueError:
+        return _empty
+
+    return {
+        "sharpe":       round(sharpe(bh_returns), 4),
+        "max_drawdown": round(max_drawdown(price_series), 4),
+        "total_return": tr,
+        "cagr":         cagr_val,
+    }

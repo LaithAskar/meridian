@@ -10,11 +10,13 @@ import pandas as pd
 import pytest
 
 from backtest.notebooks.nb_utils import (
+    BENCHMARK_METRIC_KEYS,
     METRIC_KEYS,
     WINDOW_LABELS,
     build_metrics_comparison,
     compute_drawdown_series,
     format_metric_val,
+    load_benchmark_metrics,
     load_spy_results,
     load_strategy_results,
     normalise_equity,
@@ -405,3 +407,159 @@ class TestRegimeSharpeDF:
         }
         df = regime_sharpe_df(all_results)
         assert len(df) == 3
+
+
+# ---------------------------------------------------------------------------
+# Shared benchmark fixture
+# ---------------------------------------------------------------------------
+
+def _make_benchmark_dict() -> dict:
+    window = {"sharpe": 0.72, "max_drawdown": 0.34, "total_return": 3.15, "cagr": 0.103}
+    return {
+        "name": "SPY buy-and-hold",
+        "full_window":  window,
+        "pre_covid":    {**window, "sharpe": 0.78},
+        "post_covid":   {**window, "sharpe": 0.61},
+    }
+
+
+def _write_benchmark_to_quant_metrics(base: Path) -> None:
+    """Write a quant metrics.json that contains a benchmark key, for load_benchmark_metrics tests."""
+    metrics_dict = {
+        "run_date": "2026-05-16",
+        "parameters": {"universe_size": 100},
+        "full_window": _make_metrics_dict()["full_window"],
+        "pre_covid": _make_metrics_dict()["pre_covid"],
+        "post_covid": _make_metrics_dict()["post_covid"],
+        "benchmark": _make_benchmark_dict(),
+    }
+    d = base / "quant"
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / "metrics.json", "w") as fh:
+        json.dump(metrics_dict, fh)
+
+
+# ---------------------------------------------------------------------------
+# load_benchmark_metrics
+# ---------------------------------------------------------------------------
+
+class TestLoadBenchmarkMetrics:
+    def test_returns_none_when_quant_dir_missing(self, tmp_path):
+        assert load_benchmark_metrics(tmp_path) is None
+
+    def test_returns_none_when_metrics_json_missing(self, tmp_path):
+        (tmp_path / "quant").mkdir()
+        assert load_benchmark_metrics(tmp_path) is None
+
+    def test_returns_none_when_benchmark_key_absent(self, tmp_path):
+        d = tmp_path / "quant"
+        d.mkdir()
+        with open(d / "metrics.json", "w") as fh:
+            json.dump({"run_date": "2026-05-16"}, fh)
+        assert load_benchmark_metrics(tmp_path) is None
+
+    def test_returns_benchmark_dict_when_present(self, tmp_path):
+        _write_benchmark_to_quant_metrics(tmp_path)
+        result = load_benchmark_metrics(tmp_path)
+        assert result is not None
+        assert result["name"] == "SPY buy-and-hold"
+
+    def test_benchmark_has_window_keys(self, tmp_path):
+        _write_benchmark_to_quant_metrics(tmp_path)
+        result = load_benchmark_metrics(tmp_path)
+        for key in ("full_window", "pre_covid", "post_covid"):
+            assert key in result
+
+    def test_benchmark_full_window_sharpe(self, tmp_path):
+        _write_benchmark_to_quant_metrics(tmp_path)
+        result = load_benchmark_metrics(tmp_path)
+        assert abs(result["full_window"]["sharpe"] - 0.72) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# build_metrics_comparison — benchmark column
+# ---------------------------------------------------------------------------
+
+class TestBuildMetricsComparisonBenchmark:
+    def test_no_benchmark_has_no_spy_column(self):
+        df = build_metrics_comparison({"quant": _full_results()})
+        assert "SPY B&H" not in df.columns
+
+    def test_with_benchmark_adds_spy_column(self):
+        df = build_metrics_comparison({"quant": _full_results()}, benchmark=_make_benchmark_dict())
+        assert "SPY B&H" in df.columns
+
+    def test_spy_sharpe_value_correct(self):
+        df = build_metrics_comparison(
+            {"quant": _full_results()},
+            benchmark=_make_benchmark_dict(),
+        )
+        val = df.loc["Sharpe", "SPY B&H"]
+        assert abs(float(val) - 0.72) < 1e-9
+
+    def test_spy_trade_metrics_are_none(self):
+        df = build_metrics_comparison(
+            {"quant": _full_results()},
+            benchmark=_make_benchmark_dict(),
+        )
+        # Trade-based rows must be null for SPY B&H (pandas may store None as NaN)
+        trade_labels = ["Hit Rate", "Avg Win ($)", "Avg Loss ($)", "Win/Loss Ratio",
+                        "Avg Hold (days)", "# Trades"]
+        for lbl in trade_labels:
+            assert pd.isna(df.loc[lbl, "SPY B&H"]), \
+                f"Expected null for SPY B&H row '{lbl}', got {df.loc[lbl, 'SPY B&H']!r}"
+
+    def test_excess_sharpe_row_present(self):
+        df = build_metrics_comparison({"quant": _full_results()})
+        assert "Excess Sharpe (vs SPY)" in df.index
+
+    def test_row_count_still_equals_metric_key_count(self):
+        df = build_metrics_comparison(
+            {"quant": _full_results()},
+            benchmark=_make_benchmark_dict(),
+        )
+        assert len(df) == len(METRIC_KEYS)
+
+    def test_benchmark_metric_keys_are_subset_of_metric_keys(self):
+        for k in BENCHMARK_METRIC_KEYS:
+            assert k in METRIC_KEYS
+
+    def test_pre_covid_window_spy_sharpe(self):
+        df = build_metrics_comparison(
+            {"quant": _full_results()},
+            window="pre_covid",
+            benchmark=_make_benchmark_dict(),
+        )
+        assert abs(float(df.loc["Sharpe", "SPY B&H"]) - 0.78) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# regime_sharpe_df — benchmark row
+# ---------------------------------------------------------------------------
+
+class TestRegimeSharpedfBenchmark:
+    def test_no_benchmark_row_when_none(self):
+        df = regime_sharpe_df({"quant": _full_results()})
+        assert "SPY B&H" not in df.index
+
+    def test_benchmark_row_added_when_provided(self):
+        df = regime_sharpe_df({"quant": _full_results()}, benchmark=_make_benchmark_dict())
+        assert "SPY B&H" in df.index
+
+    def test_benchmark_sharpe_values_correct(self):
+        df = regime_sharpe_df({"quant": _full_results()}, benchmark=_make_benchmark_dict())
+        full_col = WINDOW_LABELS["full_window"]
+        pre_col = WINDOW_LABELS["pre_covid"]
+        post_col = WINDOW_LABELS["post_covid"]
+        assert abs(float(df.loc["SPY B&H", full_col]) - 0.72) < 1e-9
+        assert abs(float(df.loc["SPY B&H", pre_col]) - 0.78) < 1e-9
+        assert abs(float(df.loc["SPY B&H", post_col]) - 0.61) < 1e-9
+
+    def test_three_strategies_plus_benchmark_gives_four_rows(self):
+        all_results = {"quant": _full_results(), "vader": None, "finbert": None}
+        df = regime_sharpe_df(all_results, benchmark=_make_benchmark_dict())
+        assert len(df) == 4  # 3 strategies + SPY B&H
+
+    def test_benchmark_row_absent_when_benchmark_none(self):
+        df = regime_sharpe_df({"quant": _full_results()}, benchmark=None)
+        assert "SPY B&H" not in df.index

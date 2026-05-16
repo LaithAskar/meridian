@@ -20,7 +20,9 @@ import pytest
 from backtest.metrics import (
     avg_holding_period,
     avg_win_loss,
+    benchmark_metrics,
     cagr,
+    excess_sharpe,
     exposure,
     hit_rate,
     max_drawdown,
@@ -405,3 +407,113 @@ class TestAvgHoldingPeriod:
     def test_single_trade(self):
         trades = _make_trades([100.0], holding_days=[7])
         assert avg_holding_period(trades) == pytest.approx(7.0)
+
+
+# ---------------------------------------------------------------------------
+# excess_sharpe
+# ---------------------------------------------------------------------------
+
+class TestExcessSharpe:
+    def _daily_returns(self, mean: float, std: float, n: int = 252, seed: int = 0) -> pd.Series:
+        rng = np.random.default_rng(seed)
+        return pd.Series(rng.normal(loc=mean, scale=std, size=n))
+
+    def test_equals_strategy_minus_benchmark_sharpe(self):
+        strat = self._daily_returns(0.002, 0.01, seed=1)
+        bench = self._daily_returns(0.001, 0.01, seed=2)
+        expected = sharpe(strat) - sharpe(bench)
+        assert excess_sharpe(strat, bench) == pytest.approx(expected, rel=1e-9)
+
+    def test_positive_when_strategy_outperforms(self):
+        strat = self._daily_returns(0.003, 0.01, seed=3)
+        bench = self._daily_returns(0.001, 0.01, seed=4)
+        assert excess_sharpe(strat, bench) > 0.0
+
+    def test_negative_when_strategy_underperforms(self):
+        strat = self._daily_returns(0.001, 0.01, seed=5)
+        bench = self._daily_returns(0.003, 0.01, seed=6)
+        assert excess_sharpe(strat, bench) < 0.0
+
+    def test_zero_when_identical_series(self):
+        r = self._daily_returns(0.002, 0.01, seed=7)
+        assert excess_sharpe(r, r) == pytest.approx(0.0, abs=1e-12)
+
+    def test_zero_when_both_flat(self):
+        flat = _returns([0.0] * 100)
+        assert excess_sharpe(flat, flat) == pytest.approx(0.0)
+
+    def test_empty_benchmark_gives_strategy_sharpe(self):
+        strat = self._daily_returns(0.002, 0.01)
+        empty = pd.Series([], dtype=float)
+        # sharpe(empty) = 0.0, so excess = sharpe(strat) - 0
+        assert excess_sharpe(strat, empty) == pytest.approx(sharpe(strat), rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# benchmark_metrics
+# ---------------------------------------------------------------------------
+
+class TestBenchmarkMetrics:
+    def _price_series(self, n: int = 252, start: float = 100.0, growth: float = 0.001) -> pd.Series:
+        idx = pd.date_range("2010-01-04", periods=n, freq="B")
+        prices = [start * (1 + growth) ** i for i in range(n)]
+        return pd.Series(prices, index=idx, dtype=float)
+
+    def test_returns_required_keys(self):
+        result = benchmark_metrics(self._price_series(), years=1.0)
+        assert set(result) == {"sharpe", "max_drawdown", "total_return", "cagr"}
+
+    def test_empty_series_returns_all_none(self):
+        result = benchmark_metrics(pd.Series(dtype=float), years=1.0)
+        assert all(v is None for v in result.values())
+
+    def test_zero_years_returns_all_none(self):
+        result = benchmark_metrics(self._price_series(), years=0.0)
+        assert all(v is None for v in result.values())
+
+    def test_negative_years_returns_all_none(self):
+        result = benchmark_metrics(self._price_series(), years=-1.0)
+        assert all(v is None for v in result.values())
+
+    def test_monotone_growth_gives_positive_sharpe(self):
+        result = benchmark_metrics(self._price_series(n=252, growth=0.001), years=1.0)
+        assert result["sharpe"] is not None
+        assert result["sharpe"] > 0.0
+
+    def test_monotone_growth_has_zero_drawdown(self):
+        result = benchmark_metrics(self._price_series(n=252, growth=0.001), years=1.0)
+        assert result["max_drawdown"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_total_return_approximately_correct(self):
+        # 252 bars at 0.1% daily growth ≈ e^(252*0.001) - 1 ≈ 28.4%
+        result = benchmark_metrics(self._price_series(n=252, growth=0.001), years=1.0)
+        assert result["total_return"] is not None
+        assert result["total_return"] > 0.0
+
+    def test_cagr_approximately_correct(self):
+        # $100 → $200 in 10 years → CAGR ≈ 7.18%
+        idx = pd.DatetimeIndex(["2010-01-01", "2020-01-01"])
+        prices = pd.Series([100.0, 200.0], index=idx)
+        result = benchmark_metrics(prices, years=10.0)
+        expected = 2.0 ** (1.0 / 10.0) - 1.0
+        assert result["cagr"] == pytest.approx(expected, rel=1e-3)
+
+    def test_declining_market_gives_negative_sharpe_and_return(self):
+        idx = pd.date_range("2010-01-04", periods=252, freq="B")
+        prices = pd.Series([100.0 * (0.999 ** i) for i in range(252)], index=idx)
+        result = benchmark_metrics(prices, years=1.0)
+        assert result["sharpe"] < 0.0
+        assert result["total_return"] < 0.0
+
+    def test_single_bar_returns_all_none(self):
+        idx = pd.date_range("2010-01-04", periods=1, freq="B")
+        prices = pd.Series([100.0], index=idx)
+        result = benchmark_metrics(prices, years=1.0)
+        # pct_change().dropna() on a single-element series is empty → all None
+        assert all(v is None for v in result.values())
+
+    def test_values_are_rounded_to_4dp(self):
+        result = benchmark_metrics(self._price_series(n=100), years=1.0)
+        for k, v in result.items():
+            if v is not None:
+                assert round(v, 4) == v, f"{k} not rounded to 4dp: {v}"

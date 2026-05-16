@@ -33,7 +33,9 @@ from backtest.engine import Engine
 from backtest.metrics import (
     avg_holding_period,
     avg_win_loss,
+    benchmark_metrics,
     cagr,
+    excess_sharpe,
     exposure,
     hit_rate,
     max_drawdown,
@@ -101,6 +103,7 @@ def metrics_for_window(
     equity_curve: pd.DataFrame,
     trades: pd.DataFrame,
     years: float,
+    spy_returns: pd.Series | None = None,
 ) -> dict[str, Any]:
     """
     Compute all DESIGN.md-specified metrics for one backtest window.
@@ -110,14 +113,17 @@ def metrics_for_window(
     equity_curve : Engine output, optionally date-sliced; must have 'equity' column
     trades       : Engine output, optionally date-sliced; may be empty
     years        : window length in years (used for CAGR)
+    spy_returns  : optional SPY daily return series for the same window;
+                   when provided, adds 'excess_sharpe' (strategy − SPY)
 
     Returns
     -------
     Dict with keys:
-        sharpe, sharpe_se, max_drawdown, hit_rate, avg_win, avg_loss,
-        win_loss_ratio, avg_holding_days, trade_count, exposure,
+        sharpe, sharpe_se, excess_sharpe, max_drawdown, hit_rate, avg_win,
+        avg_loss, win_loss_ratio, avg_holding_days, trade_count, exposure,
         total_return, cagr
     NaN values are converted to None for JSON-safe serialisation.
+    excess_sharpe is None when spy_returns is not provided or is empty.
     """
     if equity_curve.empty:
         return {"error": "empty_window"}
@@ -126,9 +132,16 @@ def metrics_for_window(
     wl = avg_win_loss(trades)
     ahp = avg_holding_period(trades)
 
+    xs = (
+        round(excess_sharpe(returns, spy_returns), 4)
+        if spy_returns is not None and not spy_returns.empty
+        else None
+    )
+
     return {
         "sharpe":           round(sharpe(returns), 4),
         "sharpe_se":        round(sharpe_se(returns), 4),
+        "excess_sharpe":    xs,
         "max_drawdown":     round(max_drawdown(equity_curve), 4),
         "hit_rate":         round(hit_rate(trades), 4),
         "avg_win":          _nan_to_none(None if math.isnan(wl["avg_win"]) else round(wl["avg_win"], 2)),
@@ -167,6 +180,66 @@ def slice_window(
     exit_col = pd.to_datetime(trades["exit_ts"])
     tr = trades.loc[(exit_col >= start_ts) & (exit_col <= end_ts)]
     return ec, tr
+
+
+# ---------------------------------------------------------------------------
+# SPY benchmark helpers
+# ---------------------------------------------------------------------------
+
+def _spy_slice(spy_close: pd.Series, start: date, end: date) -> pd.Series:
+    """Return spy_close clipped to [start, end] (empty if spy_close is empty)."""
+    if spy_close.empty:
+        return spy_close
+    s, e = pd.Timestamp(start), pd.Timestamp(end)
+    return spy_close.loc[(spy_close.index >= s) & (spy_close.index <= e)]
+
+
+def _spy_returns_per_window(
+    spy_close: pd.Series,
+    start: date,
+    end: date,
+    pre_end: date,
+    post_start: date,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Return (full, pre-COVID, post-COVID) SPY daily-return Series for use in
+    excess_sharpe.  Empty Series when spy_close is empty.
+    """
+    _empty = pd.Series(dtype=float)
+    if spy_close.empty:
+        return _empty, _empty, _empty
+
+    def _rets(s: date, e: date) -> pd.Series:
+        sliced = _spy_slice(spy_close, s, e)
+        return sliced.pct_change().dropna() if not sliced.empty else _empty
+
+    return _rets(start, end), _rets(start, pre_end), _rets(post_start, end)
+
+
+def _benchmark_block(
+    spy_close: pd.Series,
+    start: date,
+    end: date,
+    full_years: float,
+    pre_years: float,
+    post_years: float,
+) -> dict[str, Any] | None:
+    """
+    Build the 'benchmark' sub-dict for metrics.json.
+
+    Returns None when SPY data is unavailable.  Structure:
+        {name, full_window: {sharpe, max_drawdown, total_return, cagr},
+         pre_covid: {...}, post_covid: {...}}
+    """
+    if spy_close.empty:
+        return None
+
+    return {
+        "name": "SPY buy-and-hold",
+        "full_window": benchmark_metrics(_spy_slice(spy_close, start, end), full_years),
+        "pre_covid":   benchmark_metrics(_spy_slice(spy_close, start, PRE_COVID_END), pre_years),
+        "post_covid":  benchmark_metrics(_spy_slice(spy_close, POST_COVID_START, end), post_years),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +323,11 @@ def run_quant_backtest(
     pre_years  = (PRE_COVID_END - start).days / 365.25
     post_years = (end - POST_COVID_START).days / 365.25
 
+    # SPY returns sliced to each window, for excess-Sharpe computation
+    full_spy_rets, pre_spy_rets, post_spy_rets = _spy_returns_per_window(
+        spy_close, start, end, PRE_COVID_END, POST_COVID_START
+    )
+
     metrics: dict[str, Any] = {
         "run_date": date.today().isoformat(),
         "parameters": {
@@ -261,9 +339,12 @@ def run_quant_backtest(
             "slippage_bps":     5,
             "min_history_bars": 60,
         },
-        "full_window": metrics_for_window(result.equity_curve, result.trades, full_years),
-        "pre_covid":   metrics_for_window(pre_ec, pre_trades, pre_years),
-        "post_covid":  metrics_for_window(post_ec, post_trades, post_years),
+        "full_window": metrics_for_window(
+            result.equity_curve, result.trades, full_years, full_spy_rets
+        ),
+        "pre_covid":  metrics_for_window(pre_ec, pre_trades, pre_years, pre_spy_rets),
+        "post_covid": metrics_for_window(post_ec, post_trades, post_years, post_spy_rets),
+        "benchmark":  _benchmark_block(spy_close, start, end, full_years, pre_years, post_years),
     }
 
     metrics_path = output_dir / "metrics.json"

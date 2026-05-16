@@ -18,8 +18,13 @@ import pytest
 from backtest.engine import BacktestResult
 import backtest.run_quant as rq
 from backtest.run_quant import (
+    FULL_END,
+    FULL_START,
     PRE_COVID_END,
     POST_COVID_START,
+    _benchmark_block,
+    _spy_returns_per_window,
+    _spy_slice,
     load_spy_vix,
     metrics_for_window,
     run_quant_backtest,
@@ -410,3 +415,232 @@ class TestNanToNone:
     def test_int_preserved(self):
         from backtest.run_quant import _nan_to_none
         assert _nan_to_none(42) == 42
+
+
+# ---------------------------------------------------------------------------
+# _spy_slice
+# ---------------------------------------------------------------------------
+
+class TestSpySlice:
+    def _spy(self, n: int = 50) -> pd.Series:
+        idx = pd.bdate_range("2019-01-02", periods=n)
+        return pd.Series([300.0 + i for i in range(n)], index=idx)
+
+    def test_empty_returns_empty(self):
+        assert _spy_slice(pd.Series(dtype=float), date(2019, 1, 1), date(2019, 12, 31)).empty
+
+    def test_clips_to_start_end(self):
+        spy = self._spy(100)
+        sliced = _spy_slice(spy, date(2019, 2, 1), date(2019, 3, 31))
+        assert sliced.index.min() >= pd.Timestamp("2019-02-01")
+        assert sliced.index.max() <= pd.Timestamp("2019-03-31")
+
+    def test_full_range_returns_all(self):
+        spy = self._spy(50)
+        sliced = _spy_slice(spy, date(2018, 1, 1), date(2025, 12, 31))
+        assert len(sliced) == len(spy)
+
+    def test_non_overlapping_range_returns_empty(self):
+        spy = self._spy(50)  # starts 2019-01-02
+        sliced = _spy_slice(spy, date(2015, 1, 1), date(2016, 12, 31))
+        assert sliced.empty
+
+
+# ---------------------------------------------------------------------------
+# _spy_returns_per_window
+# ---------------------------------------------------------------------------
+
+class TestSpyReturnsPerWindow:
+    def _spy(self, n: int = 100) -> pd.Series:
+        idx = pd.bdate_range("2010-01-04", periods=n)
+        return pd.Series([100.0 * (1.001 ** i) for i in range(n)], index=idx)
+
+    def test_empty_spy_returns_three_empty_series(self):
+        empty = pd.Series(dtype=float)
+        full, pre, post = _spy_returns_per_window(
+            empty, FULL_START, FULL_END, PRE_COVID_END, POST_COVID_START
+        )
+        assert full.empty and pre.empty and post.empty
+
+    def test_returns_are_pct_change(self):
+        spy = self._spy(50)
+        full, _, _ = _spy_returns_per_window(
+            spy, date(2010, 1, 1), date(2030, 12, 31),
+            PRE_COVID_END, POST_COVID_START,
+        )
+        # pct_change of geometric series should be a constant ≈ 0.001
+        assert float(full.mean()) == pytest.approx(0.001, rel=1e-3)
+
+    def test_three_windows_non_overlapping(self):
+        spy = self._spy(300)
+        full, pre, post = _spy_returns_per_window(
+            spy,
+            date(2010, 1, 1), date(2030, 12, 31),
+            PRE_COVID_END, POST_COVID_START,
+        )
+        # pre + post should not overlap; full covers both
+        assert len(full) >= len(pre) + len(post)
+
+
+# ---------------------------------------------------------------------------
+# _benchmark_block
+# ---------------------------------------------------------------------------
+
+class TestBenchmarkBlock:
+    def _spy(self, n: int = 252) -> pd.Series:
+        idx = pd.bdate_range("2010-01-04", periods=n)
+        return pd.Series([100.0 * (1.001 ** i) for i in range(n)], index=idx)
+
+    def test_returns_none_when_spy_empty(self):
+        result = _benchmark_block(
+            pd.Series(dtype=float),
+            FULL_START, FULL_END, 14.0, 10.0, 4.0,
+        )
+        assert result is None
+
+    def test_returns_dict_with_expected_keys(self):
+        spy = self._spy(500)
+        result = _benchmark_block(spy, FULL_START, FULL_END, 14.0, 10.0, 4.0)
+        assert result is not None
+        assert "name" in result
+        assert "full_window" in result
+        assert "pre_covid" in result
+        assert "post_covid" in result
+
+    def test_name_is_spy_buy_and_hold(self):
+        spy = self._spy(500)
+        result = _benchmark_block(spy, FULL_START, FULL_END, 14.0, 10.0, 4.0)
+        assert result["name"] == "SPY buy-and-hold"
+
+    def test_window_has_benchmark_metric_keys(self):
+        spy = self._spy(500)
+        result = _benchmark_block(spy, FULL_START, FULL_END, 14.0, 10.0, 4.0)
+        for window in ("full_window", "pre_covid", "post_covid"):
+            assert set(result[window]) == {"sharpe", "max_drawdown", "total_return", "cagr"}
+
+    def test_monotone_spy_gives_positive_sharpe(self):
+        spy = self._spy(500)
+        result = _benchmark_block(spy, FULL_START, FULL_END, 14.0, 10.0, 4.0)
+        # Full window spy is monotone → positive Sharpe
+        assert result["full_window"]["sharpe"] is not None
+        assert result["full_window"]["sharpe"] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# metrics_for_window — excess_sharpe
+# ---------------------------------------------------------------------------
+
+class TestMetricsForWindowExcessSharpe:
+    def _spy_returns(self, n: int = 50, daily_mean: float = 0.001) -> pd.Series:
+        import numpy as np
+        rng = np.random.default_rng(42)
+        return pd.Series(rng.normal(loc=daily_mean, scale=0.01, size=n))
+
+    def test_excess_sharpe_none_when_no_spy_returns(self):
+        m = metrics_for_window(_make_equity_curve(), _make_trades(), years=1.0)
+        assert m["excess_sharpe"] is None
+
+    def test_excess_sharpe_none_when_spy_returns_empty(self):
+        m = metrics_for_window(
+            _make_equity_curve(), _make_trades(), years=1.0,
+            spy_returns=pd.Series(dtype=float),
+        )
+        assert m["excess_sharpe"] is None
+
+    def test_excess_sharpe_present_when_spy_returns_provided(self):
+        m = metrics_for_window(
+            _make_equity_curve(252), _empty_trades(), years=1.0,
+            spy_returns=self._spy_returns(252),
+        )
+        assert m["excess_sharpe"] is not None
+        assert isinstance(m["excess_sharpe"], float)
+
+    def test_excess_sharpe_equals_strategy_minus_spy_sharpe(self):
+        from backtest.metrics import sharpe
+        ec = _make_equity_curve(252)
+        spy_rets = self._spy_returns(252, daily_mean=0.0005)
+        m = metrics_for_window(ec, _empty_trades(), years=1.0, spy_returns=spy_rets)
+        strat_rets = ec["equity"].pct_change().dropna()
+        expected = round(sharpe(strat_rets) - sharpe(spy_rets), 4)
+        assert m["excess_sharpe"] == pytest.approx(expected, abs=1e-4)
+
+    def test_excess_sharpe_in_json_safe_result(self):
+        m = metrics_for_window(
+            _make_equity_curve(100), _make_trades(), years=1.0,
+            spy_returns=self._spy_returns(100),
+        )
+        json.dumps(m)  # must not raise (no NaN)
+
+    def test_metrics_for_window_has_excess_sharpe_key_always(self):
+        """excess_sharpe key must always be present (even when None)."""
+        m = metrics_for_window(_make_equity_curve(), _empty_trades(), years=1.0)
+        assert "excess_sharpe" in m
+
+
+# ---------------------------------------------------------------------------
+# run_quant_backtest — benchmark in metrics.json
+# ---------------------------------------------------------------------------
+
+class TestRunQuantBacktestBenchmark:
+    def _spy_series(self, n: int = 100) -> pd.Series:
+        idx = pd.bdate_range("2010-01-04", periods=n)
+        return pd.Series([300.0 + i * 0.5 for i in range(n)], index=idx)
+
+    def _patch(self, monkeypatch, n_days: int = 100, with_spy: bool = True):
+        synthetic = _synthetic_result(n_days)
+        spy = self._spy_series(n_days) if with_spy else pd.Series(dtype=float)
+        monkeypatch.setattr(rq, "load_spy_vix", lambda s, e: (spy, pd.Series(dtype=float)))
+        monkeypatch.setattr(rq.Engine, "run", lambda self: synthetic)
+
+    def test_benchmark_key_present_when_spy_available(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=True)
+        metrics = run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        assert "benchmark" in metrics
+        assert metrics["benchmark"] is not None
+
+    def test_benchmark_key_none_when_spy_unavailable(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=False)
+        metrics = run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        assert metrics["benchmark"] is None
+
+    def test_benchmark_windows_present(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=True)
+        metrics = run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        bm = metrics["benchmark"]
+        for key in ("full_window", "pre_covid", "post_covid"):
+            assert key in bm, f"Missing benchmark window: {key}"
+
+    def test_benchmark_json_serialisable(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=True)
+        metrics = run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        json.dumps(metrics)  # must not raise
+
+    def test_full_window_has_excess_sharpe(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=True)
+        metrics = run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        assert "excess_sharpe" in metrics["full_window"]
+
+    def test_metrics_json_contains_benchmark(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, with_spy=True)
+        run_quant_backtest(
+            universe=["AAPL"], start=date(2010, 1, 1), end=date(2024, 12, 31),
+            output_dir=tmp_path,
+        )
+        with open(tmp_path / "metrics.json") as fh:
+            data = json.load(fh)
+        assert "benchmark" in data
