@@ -110,7 +110,7 @@ Status marks: `[ ]` not started · `[~]` in progress (carry to next run) · `[do
 
 - [done] **4.1 — Add benchmark vs SPY buy-and-hold.**
 - [done] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
-- [ ] **4.3 — Export static HTML of the notebook for portfolio site.**
+- [done] **4.3 — Export static HTML of the notebook for portfolio site.**
 
 ---
 
