@@ -25,6 +25,29 @@ from backtest.notebooks.export_html import (
 )
 
 
+def _require_notebook_env(reason: str = "") -> None:
+    """Skip the calling test if nbconvert or a python3 kernel is unavailable.
+
+    The class-scoped fixture and standalone tests that actually execute the
+    notebook call this at the top so they skip gracefully in environments where
+    either nbconvert is absent or the kernel spec hasn't been registered yet
+    (e.g. a fresh cloud container where `python -m ipykernel install --user`
+    hasn't been run).  The error from a missing kernel is a RuntimeError /
+    NoSuchKernel deep inside nbclient — not an ImportError — so importorskip
+    alone is insufficient.
+    """
+    pytest.importorskip("nbconvert", reason="nbconvert not installed")
+    try:
+        from jupyter_client.kernelspec import KernelSpecManager
+        KernelSpecManager().get_kernel_spec("python3")
+    except Exception:
+        pytest.skip(
+            "python3 kernel spec not registered; "
+            "run: python -m ipykernel install --user --name python3"
+            + (f" ({reason})" if reason else "")
+        )
+
+
 # ---------------------------------------------------------------------------
 # TestFindRepoRoot
 # ---------------------------------------------------------------------------
@@ -140,7 +163,7 @@ class TestExportIntegration:
     @pytest.fixture(scope="class")
     def exported_html(self, tmp_path_factory):
         """Execute the notebook once and return (path, content) for all tests."""
-        pytest.importorskip("nbconvert", reason="nbconvert not installed")
+        _require_notebook_env()
         out = tmp_path_factory.mktemp("html") / "results.html"
         export(output=out, show_input=False, timeout=120)
         return out, out.read_text(encoding="utf-8")
@@ -183,7 +206,7 @@ class TestExportIntegration:
         assert 'nn">matplotlib' not in html
 
     def test_show_input_includes_code(self, tmp_path):
-        pytest.importorskip("nbconvert", reason="nbconvert not installed")
+        _require_notebook_env()
         out = tmp_path / "with_input.html"
         export(output=out, show_input=True, timeout=120)
         html = out.read_text(encoding="utf-8")
@@ -193,14 +216,14 @@ class TestExportIntegration:
         assert 'nn">matplotlib' in html
 
     def test_custom_output_path_respected(self, tmp_path):
-        pytest.importorskip("nbconvert", reason="nbconvert not installed")
+        _require_notebook_env()
         custom = tmp_path / "custom_name.html"
         result = export(output=custom, timeout=120)
         assert result == custom
         assert custom.exists()
 
     def test_return_value_equals_output_path(self, tmp_path):
-        pytest.importorskip("nbconvert", reason="nbconvert not installed")
+        _require_notebook_env()
         out = tmp_path / "ret_check.html"
         returned = export(output=out, timeout=120)
         assert returned == out
