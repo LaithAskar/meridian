@@ -104,7 +104,7 @@ UNIVERSE_2010: list[str] = [
     "AAPL", "ABT",  "ACN",  "AET",  "AIG",
     "ALL",  "AMGN", "AMZN", "APC",  "AXP",
     "BA",   "BAC",  "BK",   "BLK",  "BMY",
-    "BRK.B","C",    "CAT",  "CI",   "CL",
+    "BRK-B","C",    "CAT",  "CI",   "CL",
     "CMCSA","COP",  "COST", "CSCO", "CVS",
     "CVX",  "DD",   "DE",   "DIS",  "DOW",
     "DUK",  "DVN",  "ELV",  "EMC",  "EMR",
@@ -125,7 +125,11 @@ UNIVERSE_2010: list[str] = [
 
 # Tickers with NO yfinance price data at all over the 2010-2024 window.
 # These are excluded from the engine's symbol loop (treated as "no position"
-# for every bar).  Expected to be a small set; currently empty because all
-# 100 tickers have at least some data in Yahoo Finance's historical database.
-# If a fetch returns an empty DataFrame for a ticker not listed here, add it.
-KNOWN_NO_DATA: set[str] = set()
+# for every bar).  Confirmed empirically from the 2026-05-16 bulk download:
+# APC, KFT, MON, MRO, RTN, UTX, WBA all returned empty DataFrames from
+# yfinance despite being legitimate Jan-2010 OEX constituents — they have
+# all since been delisted or absorbed via M&A and Yahoo Finance dropped
+# their historical price feeds.  (BRK.B is NOT in this set — it just uses
+# the dash form BRK-B in yfinance; that's a ticker-format fix in the
+# UNIVERSE_2010 list above.)
+KNOWN_NO_DATA: set[str] = {"APC", "KFT", "MON", "MRO", "RTN", "UTX", "WBA"}

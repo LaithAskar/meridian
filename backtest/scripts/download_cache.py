@@ -92,7 +92,7 @@ def main(symbols: list[str] | None = None, is_dry_run: bool = False) -> None:
         return
 
     cdir = _cache_dir()
-    print(f"Downloading {len(syms)} symbols: {START} → {END}")
+    print(f"Downloading {len(syms)} symbols: {START} -> {END}")
     print(f"Cache dir : {cdir}")
     print()
 
@@ -114,7 +114,7 @@ def main(symbols: list[str] | None = None, is_dry_run: bool = False) -> None:
     print("The cloud routine will then run TODO item 3.1 automatically.")
 
     if n_ok == 0:
-        print("\nERROR: 0 symbols downloaded — likely a network block.")
+        print("\nERROR: 0 symbols downloaded -- likely a network block.")
         sys.exit(1)
 
 
