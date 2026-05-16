@@ -79,8 +79,8 @@ class TestUniverse2010Structure:
         )
 
     def test_brk_b_present(self):
-        """Berkshire Hathaway Class B (BRK.B) uses a period — must survive the list."""
-        assert "BRK.B" in UNIVERSE_2010
+        """Berkshire Hathaway Class B — stored as BRK-B (dash) because that's yfinance's canonical format."""
+        assert "BRK-B" in UNIVERSE_2010
 
     def test_googl_not_goog(self):
         """Use GOOGL (Class A with full yfinance history) not GOOG."""
