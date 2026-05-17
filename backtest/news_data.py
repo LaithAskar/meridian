@@ -46,6 +46,17 @@ _CACHE_DIR = _REPO_ROOT / "data" / "cache"
 
 NEWS_COLUMNS: tuple[str, ...] = ("date", "headline", "publisher", "url")
 
+# In-memory cache: (symbol, cache_dir_resolved) -> full processed DataFrame.
+# Backtests call load_news once per (symbol, bar_date) — without this cache
+# that's ~92 * 3500 = 320k full parquet reads per run.  The cached df holds
+# the full date range; per-call window filtering is a cheap mask.
+_NEWS_CACHE: dict[tuple[str, str], pd.DataFrame] = {}
+
+
+def clear_news_cache() -> None:
+    """Drop the in-memory news cache. Useful between distinct test runs."""
+    _NEWS_CACHE.clear()
+
 
 def _cache_path(symbol: str, cache_dir: Optional[Path] = None) -> Path:
     base = cache_dir if cache_dir is not None else _CACHE_DIR
@@ -63,6 +74,45 @@ def _empty_news() -> pd.DataFrame:
     )
 
 
+def _load_full(symbol: str, cache_dir: Optional[Path]) -> pd.DataFrame:
+    """Read + normalize the full per-symbol parquet, or emit a warning + empty.
+
+    Pure read path — no window filter applied here.  Caller does the window
+    filter so the cached df can serve multiple windows.
+    """
+    path = _cache_path(symbol, cache_dir)
+
+    if not path.exists():
+        warnings.warn(
+            f"news_data: no cache file for {symbol!r} at {path} — "
+            f"returning empty DataFrame.  Run "
+            f"`python -m backtest.scripts.download_news` to populate.",
+            stacklevel=3,
+        )
+        return _empty_news()
+
+    df = pd.read_parquet(path)
+    if df.empty:
+        return _empty_news()
+
+    df.columns = [c.lower() for c in df.columns]
+    missing = set(NEWS_COLUMNS) - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"news_data: cache file {path} is missing required columns: {missing}"
+        )
+
+    df = df[list(NEWS_COLUMNS)].copy()
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=False)
+    if hasattr(df["date"].dt, "tz") and df["date"].dt.tz is not None:
+        df["date"] = df["date"].dt.tz_localize(None)
+    df = df.dropna(subset=["date"])
+    df = df.dropna(subset=["headline"])
+
+    return df.sort_values("date").reset_index(drop=True)
+
+
 def load_news(
     symbol: str,
     start: date,
@@ -76,6 +126,9 @@ def load_news(
     emits a warning (callers — sentiment signals — must treat empty as
     "no signal for this bar," not as an error).
 
+    Repeated calls for the same symbol hit an in-memory cache of the full
+    processed DataFrame; the per-call cost is then just a window-filter mask.
+
     Returns
     -------
     pd.DataFrame with columns ``date, headline, publisher, url``.
@@ -88,47 +141,18 @@ def load_news(
     end        : inclusive end date
     cache_dir  : override the default ``data/cache/`` directory (used in tests)
     """
-    path = _cache_path(symbol, cache_dir)
+    cache_dir_key = str((cache_dir if cache_dir is not None else _CACHE_DIR).resolve())
+    key = (symbol, cache_dir_key)
 
-    if not path.exists():
-        warnings.warn(
-            f"news_data: no cache file for {symbol!r} at {path} — "
-            f"returning empty DataFrame.  Run "
-            f"`python -m backtest.scripts.download_news` to populate.",
-            stacklevel=2,
-        )
+    full = _NEWS_CACHE.get(key)
+    if full is None:
+        full = _load_full(symbol, cache_dir)
+        _NEWS_CACHE[key] = full
+
+    if full.empty:
         return _empty_news()
 
-    df = pd.read_parquet(path)
-    if df.empty:
-        return _empty_news()
-
-    # Defensive normalization — older cache files may have differently-cased
-    # column names from earlier downloads.
-    df.columns = [c.lower() for c in df.columns]
-    missing = set(NEWS_COLUMNS) - set(df.columns)
-    if missing:
-        raise ValueError(
-            f"news_data: cache file {path} is missing required columns: {missing}"
-        )
-
-    df = df[list(NEWS_COLUMNS)].copy()
-
-    # Coerce date to tz-naive datetime64[ns]
-    df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=False)
-    if hasattr(df["date"].dt, "tz") and df["date"].dt.tz is not None:
-        df["date"] = df["date"].dt.tz_localize(None)
-
-    # Drop rows whose date couldn't be parsed
-    df = df.dropna(subset=["date"])
-
-    # Filter to the requested window (inclusive)
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end) + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
-    mask = (df["date"] >= start_ts) & (df["date"] <= end_ts)
-    df = df.loc[mask]
-
-    # Drop rows with NaN headlines (FNSPID has some)
-    df = df.dropna(subset=["headline"])
-
-    return df.sort_values("date").reset_index(drop=True)
+    mask = (full["date"] >= start_ts) & (full["date"] <= end_ts)
+    return full.loc[mask].reset_index(drop=True)

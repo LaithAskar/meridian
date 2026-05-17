@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from backtest.news_data import NEWS_COLUMNS, load_news
+from backtest.news_data import NEWS_COLUMNS, clear_news_cache, load_news
 from backtest.scripts import download_news as dn
 
 
@@ -126,6 +126,40 @@ class TestLoadNews:
 
         df = load_news("AAPL", date(2020, 1, 1), date(2020, 12, 31), cache_dir=tmp_path)
         assert list(df["headline"]) == ["a", "b", "c"]
+
+    def test_repeated_calls_hit_in_memory_cache(self, tmp_path, monkeypatch):
+        # Cache is module-global; clear before populating.
+        clear_news_cache()
+
+        path = tmp_path / "news_AAPL.parquet"
+        pd.DataFrame({
+            "date": pd.to_datetime(["2020-06-05", "2020-09-01", "2021-01-15"]),
+            "headline": ["a", "b", "c"],
+            "publisher": ["p"] * 3,
+            "url": ["u"] * 3,
+        }).to_parquet(path)
+
+        import backtest.news_data as nd
+        read_count = {"n": 0}
+        real_read_parquet = pd.read_parquet
+
+        def counting_read_parquet(*args, **kwargs):
+            read_count["n"] += 1
+            return real_read_parquet(*args, **kwargs)
+
+        monkeypatch.setattr(nd.pd, "read_parquet", counting_read_parquet)
+
+        # 50 calls in different windows — without the cache this would be
+        # 50 parquet reads.  With the cache, it should be exactly 1.
+        for _ in range(50):
+            load_news("AAPL", date(2020, 1, 1), date(2020, 12, 31), cache_dir=tmp_path)
+        load_news("AAPL", date(2021, 1, 1), date(2021, 12, 31), cache_dir=tmp_path)
+
+        assert read_count["n"] == 1, (
+            f"expected exactly 1 parquet read with caching enabled, got {read_count['n']}"
+        )
+
+        clear_news_cache()
 
     def test_missing_column_raises(self, tmp_path):
         path = tmp_path / "news_AAPL.parquet"
