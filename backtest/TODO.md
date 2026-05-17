@@ -158,7 +158,10 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
 - [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance. To unblock: run `python -m backtest.scripts.download_cache` locally, then `git add data/cache/ && git commit && git push`. NOTE: data/cache/ was previously in .gitignore — that entry was removed 2026-05-16. A plain `git add data/cache/` now works without --force.] **3.1 — Run quant strategy end-to-end over full window.**
 - [blocked: depends on 2.2 + 2.4] **3.2 — Run VADER strategy end-to-end over 2010-2023 (FNSPID window).**
 - [blocked: depends on 2.3 + 2.4] **3.3 — Run FinBERT strategy end-to-end over 2010-2023 (FNSPID window).**
-- [blocked: depends on 3.1 — notebook scaffolding exists at `backtest/notebooks/results.ipynb` but `results/quant/equity_curve.csv` and `trades.csv` are header-only (zero data rows). Cannot claim "comparison notebook built" until at least one real run produces equity data. Previously marked [done] by routine 2026-05-16 prematurely — flipped back after Laith inventory.] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
+- [~: structure shipped; awaiting real results from 3.1/3.2/3.3 to populate] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
+  - Structure already supports 3-way comparison (quant + vader + finbert) via `backtest.notebooks.nb_utils.load_strategy_results`. Empty-CSV state degrades gracefully (shows "no results yet" placeholders).
+  - Disclosures section updated 2026-05-17 PM to reflect FNSPID source (CC BY-NC license), window asymmetry (FNSPID 2010-2023 vs quant 2010-2024), and FinBERT/VADER threshold parity with live bot.
+  - Acceptance: once `results/{quant,vader,finbert}/equity_curve.csv` are all non-empty, re-run the notebook end-to-end and verify all three equity curves + metrics tables render correctly.
 - [blocked: depends on 3.1 — root `README.md` is honest project-level framing but no backtester-results README exists. Cannot write "results" section without results. Previously marked [done] by routine prematurely — flipped back after Laith inventory.] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
