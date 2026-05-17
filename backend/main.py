@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.trading.config import BotConfig
 from backend.trading.stream_ingestor import StreamIngestor
+from backend.dashboard import register_dashboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +62,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+register_dashboard(app)
 
 
 @app.get("/")
