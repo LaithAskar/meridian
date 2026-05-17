@@ -28,14 +28,26 @@ If the routine hits a Phase 2 or Phase 3 task while the audit gate is unresolved
 
 ### Audit checklist progress
 
-- [ ] **A.1 — Audit `backtest/engine.py`** for lookahead leakage. Confirm `on_bar(ts, bars, portfolio)` cannot access bars beyond `ts`. Confirm fills happen at `ts+1` open, not `ts` close. Run REVIEW_CHECKLIST.md §1 line-by-line.
-- [ ] **A.2 — Audit `backtest/fills.py`** for fill semantics. Confirm slippage direction is correct on both sides. Confirm missing-next-bar cancels rather than silently filling. Run REVIEW_CHECKLIST.md §2.
-- [ ] **A.3 — Audit `backtest/universe.py`** for survivorship-bias gaps. Confirm `KNOWN_NO_DATA` rationale is documented per ticker. Confirm delisted names have post-event returns recorded honestly (acquisition price or -100%), NOT dropped. Run REVIEW_CHECKLIST.md §3.
-- [ ] **A.4 — Audit `backtest/metrics.py`** annualization. Confirm `sqrt(252)` not `sqrt(252*6.5)` for daily bars. Confirm `sharpe_se` formula matches Lo's standard error. Confirm `max_drawdown` uses running maximum, not full-series maximum (the latter is a lookahead bug). Run REVIEW_CHECKLIST.md §4.
-- [ ] **A.5 — Audit `backtest/data.py`** for point-in-time integrity. Confirm `auto_adjust=True` semantics are NOT being re-applied somewhere downstream (double-adjustment is a silent silent disaster). Confirm cache reads cannot serve dates outside fetched range. Run REVIEW_CHECKLIST.md §5.
-- [ ] **A.6 — Audit existing tests** for shallowness. For each test file: does any test assert WRONG numbers would fail? (i.e., are tests just `assert result is not None`, or do they pin known values?) Run REVIEW_CHECKLIST.md §6.
+**Recommended order (locked 2026-05-17 after council):** A.3 → A.1 → A.2 → A.5 → A.4 → A.6.
+Principle: audit from most-fundamental-flaw-class first (a biased universe invalidates the experiment regardless of math correctness; wrong annualization is recomputable). Then engine/fill mechanics, then data integrity, then metrics math, then test depth.
 
-Each audit item: Laith reads the code, runs the checklist section, writes findings to `journal/audit-{module}.md`. If a bug is found, mark the relevant Phase task `[~]` so the routine reopens it. If clean, mark `[done]` here.
+**Each audit item now bundles THREE deliverables** (locked 2026-05-17 after council):
+1. **Cite-or-FAIL per check** — for each numbered check in the REVIEW_CHECKLIST.md section, either cite `file:line` that satisfies it OR write `FAIL: <description>` and reopen the relevant TODO item.
+2. **Interview gloss per check** — 2-3 sentences "what I'd say in an interview" explaining the choice and the alternative. If unable to write this without consulting the file, the check is not done.
+3. **Adversarial test for the bug class** — write the hostile test that the routine-written tests don't have (e.g., for A.1: a malicious `Strategy` subclass that tries to look ahead, with the engine expected to prevent or expose it). Commit as part of the audit.
+
+**Cascade budget**: expect 2-3 FAIL→fix→re-audit cycles across the six items total. Plan for this; don't be surprised by it.
+
+**No routine-drafted findings** — even draft. The cognitive load of reading code against checklist is the interview-defense generator. Routine output recreates the failure mode this gate exists to fix.
+
+- [audit-required] **A.3 — Audit `backtest/universe.py`** (DO FIRST) for survivorship-bias gaps. Confirm `KNOWN_NO_DATA` rationale is documented per ticker. Confirm delisted names have post-event returns recorded honestly (acquisition price or -100%), NOT dropped. Run REVIEW_CHECKLIST.md §3. Adversarial test: assert that a name known to have delisted mid-window (pick one from the documented set) produces a recorded position trace through its delisting date — not silently absent.
+- [audit-required] **A.1 — Audit `backtest/engine.py`** for lookahead leakage. Confirm `on_bar(ts, bars, portfolio)` cannot access bars beyond `ts`. Confirm fills happen at `ts+1` open, not `ts` close. Run REVIEW_CHECKLIST.md §1 line-by-line. Adversarial test: a `LookaheadStrategy` subclass that tries to read `bars[ts + timedelta(days=1)]` — engine must either raise or return identical results to a non-lookahead control (the latter would prove the lookahead attempt had no effect).
+- [audit-required] **A.2 — Audit `backtest/fills.py`** for fill semantics. Confirm slippage direction is correct on both sides. Confirm missing-next-bar cancels rather than silently filling. Run REVIEW_CHECKLIST.md §2. Adversarial test: a sequence where the next bar is `None` (delisting simulation) — assert the order is cancelled, not silently filled at `None` or at the current bar's close.
+- [audit-required] **A.5 — Audit `backtest/data.py`** for point-in-time integrity. Confirm `auto_adjust=True` semantics are NOT being re-applied somewhere downstream (double-adjustment is a silent disaster). Confirm cache reads cannot serve dates outside fetched range. Run REVIEW_CHECKLIST.md §5. Adversarial test: cache `[2020, 2022]`, then request `[2010, 2024]` — assert the engine receives the full widened range, not the cached subset.
+- [audit-required] **A.4 — Audit `backtest/metrics.py`** annualization. Confirm `sqrt(252)` not `sqrt(252*6.5)` for daily bars. Confirm `sharpe_se` formula matches Lo's standard error. Confirm `max_drawdown` uses running maximum, not full-series maximum (the latter is a lookahead bug). Run REVIEW_CHECKLIST.md §4. Adversarial test: a hand-computed Sharpe for a known 5-element return series, pinned to 6 decimal places — and a `max_drawdown` test on a curve whose full-series-max is in the middle (so full-max would give a wrong number that running-max would not).
+- [audit-required] **A.6 — Audit existing tests** for shallowness. For each test file: does any test assert WRONG numbers would fail? (i.e., are tests just `assert result is not None`, or do they pin known values?) Run REVIEW_CHECKLIST.md §6. Adversarial work here is meta: count shape-only assertions, list which checks have zero pinned-value coverage, and stub the test names that need writing as `[ ]` items in this TODO file.
+
+Each audit item: Laith reads the code, runs the checklist section, writes findings to `journal/audit-{module}.md` (with the three deliverables above), commits the adversarial test. If a bug is found, mark the relevant Phase task `[~]` so the routine reopens it. If clean, mark `[done]` here.
 
 ---
 
@@ -114,28 +126,38 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
   - If the live modules are too entangled with live infra to adapt cleanly, copy + adapt the signal *logic* into the wrapper rather than monkey-patching. Document in the file's docstring.
   - Tests: synthetic bar series with clear trend → momentum signal fires correctly.
 
-- [blocked: no historical news data source available for 2010-2024; yfinance .news returns only recent articles, no timestamp-aligned historical feed] **2.2 — VADER signal wrapper.**
+- [blocked: depends on 2.4] **2.2 — VADER signal wrapper.** (HAND-BUILT territory)
   - File: `backtest/signals/vader.py`
-  - Input: news headlines per symbol per timestamp (need a news data source — see 2.4).
-  - Output: VADER compound score → discretized to -1/0/+1 with thresholds matching live bot.
-  - If no historical news data, this signal is BLOCKED — note as `[blocked: need historical news data source]` and skip to next item.
-  - Tests: known headline → known signal.
+  - Input: news headlines per symbol per timestamp (FNSPID via 2.4).
+  - Output: VADER compound score → discretized to -1/0/+1 with thresholds matching live bot's `backend/trading/sentiment_engine.py`.
+  - Tests: known headline → known signal. Edge case: empty news for a (ticker, date) returns 0 (no signal), not NaN.
 
-- [blocked: same dependency as 2.2 — requires historical news headlines aligned to daily timestamps for 2010-2024] **2.3 — FinBERT signal wrapper.**
+- [blocked: depends on 2.4] **2.3 — FinBERT signal wrapper.** (HAND-BUILT territory)
   - File: `backtest/signals/finbert.py`
-  - Same shape as 2.2 but uses FinBERT classifier from `backend/trading/sentiment_engine.py`.
-  - Same blocker risk as 2.2.
+  - Same shape as 2.2 but uses FinBERT classifier from `backend/trading/sentiment_engine.py` (live bot already loads the model — reuse).
+  - Batch-classification at backtest time may be slow; cache classifications to `data/cache/finbert_scores_{symbol}.parquet` keyed by (date, headline_hash) so repeated runs don't re-classify.
 
-- [blocked: waiting for Laith decision — options and tradeoffs documented in journal/2026-05-15-pm8.md] **2.4 — Historical news data source (BLOCKED CHECKPOINT).**
-  - This is the hardest part. Historical news headlines aligned to timestamps for 100 tickers over 9 years is not free.
-  - Options: (a) Polygon news API ($$), (b) GDELT (free but messy), (c) skip sentiment backtest and only report quant (degraded scope), (d) use a subset window (last 2 years where news data is cheaper/available).
-  - **STOP HERE AND FLAG FOR LAITH.** Write a recap proposing the options with cost/effort tradeoffs. Do not proceed past this without his decision.
+- [~: code shipped 2026-05-17 PM under Laith's coding-agent override; live 23 GB download is operator-run] **2.4 — Historical news data source: FNSPID (resolved 2026-05-17 after council pushback).** (ROUTINE territory — data plumbing only; signal logic stays hand-built)
+  - Code shipped: `backtest/news_data.py` (loader API), `backtest/scripts/download_news.py` (streamed CSV downloader + chunked parquet writer), `backtest/tests/test_news_data.py` (12 tests, all green).
+  - Access pattern: FNSPID-on-HF dataset viewer is broken; we bypass `datasets` and download the canonical 23 GB CSV at `Stock_news/nasdaq_exteral_data.csv` (note FNSPID-published filename typo "exteral").
+  - **Next operator step:** `python -m backtest.scripts.download_news` (run once, ~30-60 min on broadband, ~23 GB transient disk; the raw CSV is auto-deleted after slicing unless `--keep-raw`).
+  - Acceptance: spot-check `data/cache/news_AAPL.parquet` is non-empty and covers 2010-2023 after the operator run.
+  - Source: FNSPID (Financial News and Stock Price Integration Dataset), Dong et al. 2024. HuggingFace dataset `Zihan1004/FNSPID`. 15.7M news records, 4,775 S&P 500 companies, 1999-2023. License: CC BY-NC 4.0. Use is non-commercial backtest evidence; commercial v2 product would need separate license review (see DESIGN.md disclosure §6).
+  - File: `backtest/scripts/download_news.py` (new — keeps audited `data.py` untouched)
+  - Steps:
+    1. Download FNSPID from HuggingFace. Choose the "full" or "downsized" variant depending on disk budget (full is ~14GB compressed). Document choice in script.
+    2. Filter rows to tickers ∈ UNIVERSE_2010 ∪ {SPY}. Filter to date range 2010-01-01 → 2023-12-31.
+    3. Write to parquet cache: `data/cache/news_{symbol}.parquet` with columns (date, headline, source, raw_url). One file per ticker. Symbols not present in FNSPID: log warning, write empty parquet (signal returns 0 for those, not crash).
+    4. Companion module `backtest/news_data.py` with `load_news(symbol, start, end) -> pd.DataFrame` for signal wrappers to consume.
+  - Tests (in new `backtest/tests/test_news_data.py`): MultiIndex shape, expected columns, ticker filter works, date filter works, empty-result for known-missing ticker returns empty DataFrame (NOT crash), no NaN in headline column for non-empty rows.
+  - Acceptance: `download_news.py` populates cache for ≥80% of UNIVERSE_2010 (expect FNSPID to cover most of S&P 100 — flag and document the missing 20% if higher). `load_news('AAPL', date(2020,3,1), date(2020,3,31))` returns a non-empty DataFrame.
+  - **Window asymmetry note:** FNSPID stops at 2023-12-31. Quant backtest goes through 2024-12-31 (yfinance). Decide at integration: (a) truncate quant to 2023-12-31 for clean comparison, OR (b) keep asymmetry with disclosure that sentiment metrics are 2010-2023 while quant is 2010-2024. Default to (a) for fair comparison unless Laith overrides.
 
 ## Phase 3 — Run + report
 
 - [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance. To unblock: run `python -m backtest.scripts.download_cache` locally, then `git add data/cache/ && git commit && git push`. NOTE: data/cache/ was previously in .gitignore — that entry was removed 2026-05-16. A plain `git add data/cache/` now works without --force.] **3.1 — Run quant strategy end-to-end over full window.**
-- [blocked: depends on 2.4 resolution — no historical news data source available] **3.2 — Run VADER strategy end-to-end (if 2.4 resolved).**
-- [blocked: depends on 2.4 resolution — no historical news data source available] **3.3 — Run FinBERT strategy end-to-end (if 2.4 resolved).**
+- [blocked: depends on 2.2 + 2.4] **3.2 — Run VADER strategy end-to-end over 2010-2023 (FNSPID window).**
+- [blocked: depends on 2.3 + 2.4] **3.3 — Run FinBERT strategy end-to-end over 2010-2023 (FNSPID window).**
 - [blocked: depends on 3.1 — notebook scaffolding exists at `backtest/notebooks/results.ipynb` but `results/quant/equity_curve.csv` and `trades.csv` are header-only (zero data rows). Cannot claim "comparison notebook built" until at least one real run produces equity data. Previously marked [done] by routine 2026-05-16 prematurely — flipped back after Laith inventory.] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
 - [blocked: depends on 3.1 — root `README.md` is honest project-level framing but no backtester-results README exists. Cannot write "results" section without results. Previously marked [done] by routine prematurely — flipped back after Laith inventory.] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
