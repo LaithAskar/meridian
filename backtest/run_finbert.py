@@ -53,7 +53,7 @@ from backtest.run_common import (
     spy_returns_for_windows,
 )
 from backtest.signals.finbert import FinBERTStrategy
-from backtest.universe import UNIVERSE_2010
+from backtest.universe import UNIVERSE_2010, tradable_universe
 
 _LOG = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def run_finbert_backtest(
     over the same news set are fast.
     """
     if universe is None:
-        universe = list(UNIVERSE_2010)
+        universe = list(tradable_universe())
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

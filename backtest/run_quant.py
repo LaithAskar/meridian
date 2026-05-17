@@ -44,7 +44,7 @@ from backtest.metrics import (
     total_return,
 )
 from backtest.signals.quant import QuantStrategy
-from backtest.universe import UNIVERSE_2010
+from backtest.universe import UNIVERSE_2010, tradable_universe
 
 _LOG = logging.getLogger(__name__)
 
@@ -270,7 +270,11 @@ def run_quant_backtest(
     The metrics dict (identical content written to metrics.json).
     """
     if universe is None:
-        universe = list(UNIVERSE_2010)
+        # Use tradable_universe (UNIVERSE_2010 minus KNOWN_NO_DATA) so the
+        # engine doesn't silently consume wrong-company data for tickers
+        # whose original 2010-era issuer was acquired but whose symbol has
+        # since been re-used.  Added 2026-05-17 per audit A.3 §3.1.
+        universe = list(tradable_universe())
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

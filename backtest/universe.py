@@ -123,13 +123,37 @@ UNIVERSE_2010: list[str] = [
     "VZ",   "WBA",  "WFC",  "WMT",  "XOM",
 ]
 
-# Tickers with NO yfinance price data at all over the 2010-2024 window.
+# Tickers with NO usable yfinance price data over the 2010-2024 window.
 # These are excluded from the engine's symbol loop (treated as "no position"
 # for every bar).  Confirmed empirically from the 2026-05-16 bulk download:
 # APC, KFT, MON, MRO, RTN, UTX, WBA all returned empty DataFrames from
 # yfinance despite being legitimate Jan-2010 OEX constituents — they have
 # all since been delisted or absorbed via M&A and Yahoo Finance dropped
-# their historical price feeds.  (BRK.B is NOT in this set — it just uses
-# the dash form BRK-B in yfinance; that's a ticker-format fix in the
-# UNIVERSE_2010 list above.)
-KNOWN_NO_DATA: set[str] = {"APC", "KFT", "MON", "MRO", "RTN", "UTX", "WBA"}
+# their historical price feeds.
+#
+# EMC added 2026-05-17 after audit A.3 §3.1 found ticker re-use: the
+# original EMC Corporation was acquired by Dell Sep 2016 and Yahoo Finance
+# dropped its 2010-2016 history; the EMC ticker is now in use by an
+# unrelated security (411 bars starting 2023-05-15 as of 2026-05-17).
+# Without excluding EMC, the backtester would silently feed an unrelated
+# company's 2023-2024 data into the engine.  See journal/audit-universe.md.
+#
+# (BRK.B is NOT in this set — it just uses the dash form BRK-B in yfinance;
+# that's a ticker-format fix in the UNIVERSE_2010 list above.)
+KNOWN_NO_DATA: set[str] = {"APC", "EMC", "KFT", "MON", "MRO", "RTN", "UTX", "WBA"}
+
+
+def tradable_universe() -> list[str]:
+    """UNIVERSE_2010 with KNOWN_NO_DATA tickers removed.
+
+    The runners should pass *this* list (not UNIVERSE_2010 directly) to the
+    Engine so KNOWN_NO_DATA tickers are actually excluded — not just claimed
+    to be excluded by the docstring.  Added 2026-05-17 after audit A.3 §3.1
+    found that EMC, despite being a 2010-OEX-era acquired name, returned
+    real-looking but unrelated post-2023 yfinance data that the engine
+    would otherwise silently consume.  See journal/audit-universe.md.
+
+    Returns the tradable list in deterministic UNIVERSE_2010 order
+    (NOT alphabetised) so downstream behaviour is repeatable.
+    """
+    return [s for s in UNIVERSE_2010 if s not in KNOWN_NO_DATA]

@@ -53,7 +53,7 @@ from backtest.run_common import (
     spy_returns_for_windows,
 )
 from backtest.signals.vader import VADERStrategy
-from backtest.universe import UNIVERSE_2010
+from backtest.universe import UNIVERSE_2010, tradable_universe
 
 _LOG = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def run_vader_backtest(
 ) -> dict[str, Any]:
     """Run VADERStrategy end-to-end and persist results."""
     if universe is None:
-        universe = list(UNIVERSE_2010)
+        universe = list(tradable_universe())
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
