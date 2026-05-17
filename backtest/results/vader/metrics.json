@@ -1,0 +1,81 @@
+{
+  "run_date": "2026-05-17",
+  "strategy": "vader",
+  "parameters": {
+    "universe_size": 92,
+    "start": "2010-01-01",
+    "end": "2023-12-31",
+    "max_positions": 10,
+    "initial_cash": 1000000.0,
+    "slippage_bps": 5,
+    "threshold": 0.35,
+    "min_headlines": 2,
+    "min_consensus": 0.6
+  },
+  "full_window": {
+    "sharpe": 0.5857,
+    "sharpe_se": 0.0182,
+    "excess_sharpe": -0.2022,
+    "max_drawdown": 0.4115,
+    "hit_rate": 0.6232,
+    "avg_win": 53953.52,
+    "avg_loss": -29046.42,
+    "win_loss_ratio": 1.8575,
+    "avg_holding_days": 539.97,
+    "trade_count": 69,
+    "exposure": 0.9994,
+    "total_return": 2.1735,
+    "cagr": 0.086
+  },
+  "pre_covid": {
+    "sharpe": 0.6343,
+    "sharpe_se": 0.0217,
+    "excess_sharpe": -0.2146,
+    "max_drawdown": 0.179,
+    "hit_rate": 0.6667,
+    "avg_win": 36640.3,
+    "avg_loss": -19273.38,
+    "win_loss_ratio": 1.9011,
+    "avg_holding_days": 531.61,
+    "trade_count": 51,
+    "exposure": 0.9992,
+    "total_return": 1.21,
+    "cagr": 0.0812
+  },
+  "post_covid": {
+    "sharpe": 0.4921,
+    "sharpe_se": 0.0341,
+    "excess_sharpe": -0.1906,
+    "max_drawdown": 0.3526,
+    "hit_rate": 0.5,
+    "avg_win": 119358.99,
+    "avg_loss": -47506.6,
+    "win_loss_ratio": 2.5125,
+    "avg_holding_days": 563.67,
+    "trade_count": 18,
+    "exposure": 1.0,
+    "total_return": 0.3751,
+    "cagr": 0.0866
+  },
+  "benchmark": {
+    "name": "SPY buy-and-hold",
+    "full_window": {
+      "sharpe": 0.7879,
+      "max_drawdown": 0.3372,
+      "total_return": 4.4552,
+      "cagr": 0.1289
+    },
+    "pre_covid": {
+      "sharpe": 0.8489,
+      "max_drawdown": 0.1935,
+      "total_return": 2.1929,
+      "cagr": 0.121
+    },
+    "post_covid": {
+      "sharpe": 0.6827,
+      "max_drawdown": 0.2832,
+      "total_return": 0.6376,
+      "cagr": 0.1373
+    }
+  }
+}
