@@ -103,6 +103,25 @@ class TestCacheCovers:
         df.to_parquet(path)
         assert not _cache_covers(path, date(2024, 1, 1), date(2024, 1, 5))
 
+    def test_tolerates_short_gap_at_start(self, tmp_path):
+        # Cache starts at first trading day after a holiday weekend; request
+        # starts on the calendar Saturday before.  Must be considered covered.
+        path = tmp_path / "AAPL_1d.parquet"
+        _write_parquet(path, date(2010, 1, 4), date(2024, 12, 31))  # Mon → year-end
+        assert _cache_covers(path, date(2010, 1, 1), date(2023, 12, 31))
+
+    def test_tolerates_short_gap_at_end(self, tmp_path):
+        path = tmp_path / "AAPL_1d.parquet"
+        _write_parquet(path, date(2024, 1, 2), date(2024, 1, 26))  # Fri end
+        # Request ends 2024-01-31 (Wed); 5-day gap should still satisfy.
+        assert _cache_covers(path, date(2024, 1, 2), date(2024, 1, 31))
+
+    def test_does_not_tolerate_large_gap(self, tmp_path):
+        # 8 calendar days exceeds the 7-day tolerance.
+        path = tmp_path / "AAPL_1d.parquet"
+        _write_parquet(path, date(2024, 1, 10), date(2024, 1, 31))
+        assert not _cache_covers(path, date(2024, 1, 1), date(2024, 1, 31))
+
 
 # ---------------------------------------------------------------------------
 # fetch_bars — core behaviour

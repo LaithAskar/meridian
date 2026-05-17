@@ -41,13 +41,31 @@ _CACHE_DIR = _REPO_ROOT / "data" / "cache"
 _YF_RATE_LIMIT_PAUSE = 0.2  # seconds between fetches (~5 symbols/sec)
 _YF_RETRY_PAUSE = 1.0       # seconds before the single retry attempt
 
+# Calendar-day slack allowed at the edges of a cached date range.  yfinance
+# only returns trading days, so a request starting on a Saturday is satisfied
+# by a cache that starts on the following Monday.  The longest US-market
+# holiday-weekend gap is 4 days (e.g., Thanksgiving Thursday + Friday close);
+# 7 covers it plus a small safety margin.  Without this slack a bug would
+# silently truncate the cache to the requested window on every misaligned
+# call — found 2026-05-17 after a backtest re-fetched 2010-2024 data down
+# to 2010-2023 because the request started on 2010-01-01 (Saturday) and the
+# existing cache started on 2010-01-04 (Monday, first trading day of 2010).
+_CACHE_DATE_TOLERANCE_DAYS = 7
+
 
 def _cache_path(symbol: str, interval: str) -> Path:
     return _CACHE_DIR / f"{symbol}_{interval}.parquet"
 
 
 def _cache_covers(path: Path, start: date, end: date) -> bool:
-    """Return True if *path* exists and its date index spans [start, end]."""
+    """Return True if *path* exists and its trading-day index spans
+    approximately [start, end].
+
+    "Approximately" tolerates up to _CACHE_DATE_TOLERANCE_DAYS calendar days
+    of slack at each edge to account for non-trading-day start/end requests
+    being satisfied by a cache whose first/last dates are the nearest trading
+    days.
+    """
     if not path.exists():
         return False
     df = pd.read_parquet(path)
@@ -59,7 +77,9 @@ def _cache_covers(path: Path, start: date, end: date) -> bool:
 
     first: date = pd.Timestamp(dates.min()).date()
     last: date = pd.Timestamp(dates.max()).date()
-    return first <= start and last >= end
+    start_ok = (first - start).days <= _CACHE_DATE_TOLERANCE_DAYS
+    end_ok = (end - last).days <= _CACHE_DATE_TOLERANCE_DAYS
+    return start_ok and end_ok
 
 
 def _download_symbol(symbol: str, start: date, end: date, interval: str) -> pd.DataFrame:
