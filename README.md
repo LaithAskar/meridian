@@ -194,6 +194,32 @@ These disclosures are locked in `backtest/DESIGN.md` and are reprinted here verb
 
 ---
 
+## Resume current work
+
+Two compute jobs were paused this session (laptop cooling). State persists; resume is a single command each:
+
+```bash
+# Resume FinBERT classification cache (currently 19.7% — 66,828/339,740 headlines).
+# Idempotent: reads existing cache, classifies only what's missing.
+python -m backtest.scripts.precompute_finbert
+
+# Re-run quant backtest post-EMC-fix (overwrites backtest/results/quant/ with universe=92).
+python -m backtest.run_quant
+
+# After FinBERT precompute finishes, the run becomes a pure cache hit (minutes):
+python -m backtest.run_finbert
+
+# Populate paper-trading section of the dashboard (single 5-10 min backtest run, output → data/paper/quant/):
+python -m backend.paper_trader --strategy quant
+```
+
+Then re-export the static notebook HTML:
+```bash
+python -m backtest.notebooks.export_html
+```
+
+Full session context: `backtest/TODO.md` Phase 3 + Phase 5; `git log --oneline -15` for the recent commit chain.
+
 ## Quick Start
 
 ### Backend
@@ -262,6 +288,15 @@ The `TRADING_PAPER_MODE` env var only ratchets toward paper mode (true forces pa
 | `POST /api/trading/stop` | Stop |
 | `GET /api/trading/status` | Status, mode, login state, recent trades |
 | `GET /api/trading/signals` | Recent signals + intents |
+
+### Strategy Dashboard
+| Endpoint | Description |
+|---|---|
+| `GET /dashboard` | Self-contained HTML dashboard (Chart.js via CDN) — three strategy cards × {backtest, paper} sections |
+| `GET /api/strategies` | All three backtest payloads (metrics + equity + benchmark + trades) |
+| `GET /api/strategies/{quant\|vader\|finbert}` | Single backtest payload |
+| `GET /api/paper` | All three paper payloads (forward-extended) |
+| `GET /api/paper/{quant\|vader\|finbert}` | Single paper payload |
 
 ### Robinhood Account
 | Endpoint | Description |
