@@ -126,16 +126,16 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
   - If the live modules are too entangled with live infra to adapt cleanly, copy + adapt the signal *logic* into the wrapper rather than monkey-patching. Document in the file's docstring.
   - Tests: synthetic bar series with clear trend → momentum signal fires correctly.
 
-- [blocked: depends on 2.4] **2.2 — VADER signal wrapper.** (HAND-BUILT territory)
-  - File: `backtest/signals/vader.py`
-  - Input: news headlines per symbol per timestamp (FNSPID via 2.4).
-  - Output: VADER compound score → discretized to -1/0/+1 with thresholds matching live bot's `backend/trading/sentiment_engine.py`.
-  - Tests: known headline → known signal. Edge case: empty news for a (ticker, date) returns 0 (no signal), not NaN.
+- [done: 2026-05-17 PM under Laith's coding-agent override (authorized signals territory via AskUserQuestion)] **2.2 — VADER signal wrapper.** (originally HAND-BUILT territory)
+  - File: `backtest/signals/vader.py` — `VADERStrategy`, threshold 0.35 (matches live bot's `SentimentEngine.vader_threshold`).
+  - Shared logic (news lookup per bar, per-ticker consensus, sell-then-buy order generation) lives in `backtest/signals/sentiment_base.py`.
+  - Tests in `backtest/tests/test_signals_sentiment.py` (28 tests, all green).
 
-- [blocked: depends on 2.4] **2.3 — FinBERT signal wrapper.** (HAND-BUILT territory)
-  - File: `backtest/signals/finbert.py`
-  - Same shape as 2.2 but uses FinBERT classifier from `backend/trading/sentiment_engine.py` (live bot already loads the model — reuse).
-  - Batch-classification at backtest time may be slow; cache classifications to `data/cache/finbert_scores_{symbol}.parquet` keyed by (date, headline_hash) so repeated runs don't re-classify.
+- [done: 2026-05-17 PM under Laith's coding-agent override (authorized signals territory via AskUserQuestion)] **2.3 — FinBERT signal wrapper.** (originally HAND-BUILT territory)
+  - File: `backtest/signals/finbert.py` — `FinBERTStrategy` (threshold 0.6) + `FinBERTScorer` (disk-backed cache).
+  - Compound = P(positive) - P(negative), matching `backend/trading/sentiment_engine.py`.
+  - Cache: ONE global file at `data/cache/finbert_scores.parquet`, keyed by sha1(stripped+lowercased headline). Deviates from the spec's per-symbol layout (rationale documented in `backtest/signals/finbert.py` module docstring): FinBERT scoring is text-only, so per-symbol cache would re-classify duplicated headlines N times.
+  - Model loading is lazy (first cache-miss `score()` call). Construction is cheap.
 
 - [~: code shipped 2026-05-17 PM under Laith's coding-agent override; live 23 GB download is operator-run] **2.4 — Historical news data source: FNSPID (resolved 2026-05-17 after council pushback).** (ROUTINE territory — data plumbing only; signal logic stays hand-built)
   - Code shipped: `backtest/news_data.py` (loader API), `backtest/scripts/download_news.py` (streamed CSV downloader + chunked parquet writer), `backtest/tests/test_news_data.py` (12 tests, all green).
