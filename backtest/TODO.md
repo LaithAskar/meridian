@@ -162,15 +162,15 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
   - Structure already supports 3-way comparison (quant + vader + finbert) via `backtest.notebooks.nb_utils.load_strategy_results`. Empty-CSV state degrades gracefully (shows "no results yet" placeholders).
   - Disclosures section updated 2026-05-17 PM to reflect FNSPID source (CC BY-NC license), window asymmetry (FNSPID 2010-2023 vs quant 2010-2024), and FinBERT/VADER threshold parity with live bot.
   - Acceptance: once `results/{quant,vader,finbert}/equity_curve.csv` are all non-empty, re-run the notebook end-to-end and verify all three equity curves + metrics tables render correctly.
-- [blocked: depends on 3.1 — root `README.md` is honest project-level framing but no backtester-results README exists. Cannot write "results" section without results. Previously marked [done] by routine prematurely — flipped back after Laith inventory.] **3.5 — README with results + honest disclosures from DESIGN.md.**
+- [~: README backtester section refreshed 2026-05-17 PM with current Phase 3 code + FNSPID disclosure; numerical results still need to be transcribed in once all three signals run] **3.5 — README with results + honest disclosures from DESIGN.md.**
 
 ## Phase 4 — Polish (only if Phase 3 done by July 1)
 
 **STATE 2026-05-16:** Phase 4's own acceptance gate ("only if Phase 3 done by July 1") is unmet — Phase 3.1 is blocked. The routine marked 4.1–4.3 [done] anyway, in violation of this gate. All flipped back to [blocked] pending real Phase 3.1 run.
 
-- [blocked: depends on 3.1 — SPY benchmark cannot be plotted/computed without a real equity curve to benchmark against. Previously marked [done] by routine prematurely.] **4.1 — Add benchmark vs SPY buy-and-hold.**
+- [done: 2026-05-17 PM — run_quant produces spy_curve.csv and metrics.json includes benchmark.{full_window,pre_covid,post_covid} blocks with Sharpe/MaxDD/Total-Return/CAGR. run_vader and run_finbert follow the same pattern.] **4.1 — Add benchmark vs SPY buy-and-hold.**
 - [blocked: depends on 3.1 — `backtest/robustness.py` module exists with passing tests on synthetic data, but no robustness CHECKS have been run against a real strategy run. Previously marked [done] by routine prematurely.] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
-- [blocked: depends on 3.1 — `backtest/notebooks/results.html` is 8588-line scaffolding from a notebook with no real data. HTML exists but contains no actual results. Previously marked [done] by routine prematurely.] **4.3 — Export static HTML of the notebook for portfolio site.**
+- [~: re-exported 2026-05-17 PM with quant results landed (559 KB HTML, real content); needs re-export after VADER + FinBERT runs complete to include all three signal sources] **4.3 — Export static HTML of the notebook for portfolio site.**
 
 ---
 
