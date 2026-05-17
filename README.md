@@ -80,8 +80,10 @@ Missing next bars (delisted stocks) cancel the order rather than filling at a st
 | Signal | Module | Method |
 |---|---|---|
 | **Quant** | `backtest/signals/quant.py` | Momentum (12-month cross-sectional + EMA-MACD time-series) + mean-reversion (RSI-14 + Bollinger Band z-score) combined with regime-adjusted weights. Regime is detected from SPY SMA-50/SMA-200 and VIX level. |
-| **VADER** | `backtest/signals/vader.py` | Blocked — requires historical news headlines aligned to daily timestamps for 100 tickers over 14 years. No free source exists. See [blocker details](#blockers). |
-| **FinBERT** | `backtest/signals/finbert.py` | Blocked — same dependency as VADER. See [blocker details](#blockers). |
+| **VADER** | `backtest/signals/vader.py` | VADER `SentimentIntensityAnalyzer` on FNSPID-sourced headlines. Compound score in [-1, 1]; threshold ±0.35 (matches live bot). Per-ticker daily consensus requires ≥2 headlines and ≥60% directional agreement. |
+| **FinBERT** | `backtest/signals/finbert.py` | ProsusAI/finbert transformer on FNSPID headlines. Compound = P(positive) − P(negative) ∈ [-1, 1]; threshold ±0.6 (matches live bot). Disk-backed classification cache at `data/cache/finbert_scores.parquet` so repeated runs are fast. Same consensus rule as VADER. |
+
+Sentiment signals share a base class (`backtest/signals/sentiment_base.py`) handling news lookup per bar, per-ticker consensus, and order generation; the backends differ only in how they score a single headline string.
 
 ### Regime splits
 
@@ -114,39 +116,55 @@ Missing next bars (delisted stocks) cancel the order rather than filling at a st
 | Event-loop engine with portfolio accounting | Done |
 | Metrics module (Sharpe, max DD, hit rate, etc.) | Done |
 | Quant signal wrapper | Done |
-| VADER signal wrapper | Blocked — no historical news data source |
-| FinBERT signal wrapper | Blocked — same |
-| Run quant backtest end-to-end | Blocked — cloud environment network policy blocks outbound yfinance requests (HTTP 403 from Yahoo Finance). To unblock: either whitelist `finance.yahoo.com` in the environment's network policy, or pre-download and commit parquet files to `data/cache/` from a local machine. |
-| Run VADER / FinBERT backtests | Blocked — waiting on news data decision |
-| Comparison notebook (`backtest/notebooks/results.ipynb`) | Done — renders gracefully with no data; fills in automatically once results land |
+| VADER signal wrapper | Done |
+| FinBERT signal wrapper | Done (with disk-backed score cache) |
+| FNSPID news data loader + downloader | Done; operator-run download fetches 23 GB CSV, slices to per-ticker parquets |
+| `run_quant.py` / `run_vader.py` / `run_finbert.py` end-to-end runners | Done |
+| Comparison notebook (`backtest/notebooks/results.ipynb`) | Done — renders gracefully with no data; auto-populates as `results/{quant,vader,finbert}/equity_curve.csv` land |
+| Audit gate (A.1–A.6 in `backtest/TODO.md`) | Open — Laith-only hostile-review of already-shipped Phase 0/1 modules against `backtest/REVIEW_CHECKLIST.md`. Must clear before claiming numbers are interview-defensible. |
 
-**Results are not yet available** because the yfinance data fetch is blocked by the cloud environment's outbound network policy. The code is complete and all 269 unit tests pass. See `journal/2026-05-15-pm9.md` for the exact error and unblocking options.
+All 461 unit tests pass (12 skipped — Jupyter integration tests requiring a kernel spec).
+
+**Numerical results are not yet in this README** — they land after running the three backtest commands documented under "Running it locally." Quant requires only the yfinance parquet cache (~180 MB); sentiment requires the FNSPID news cache (one-time ~23 GB download, sliced to ~50 MB of per-ticker parquets).
 
 ### Running it locally
 
-Once the data cache is populated (one-time download):
+One-time data downloads:
 
 ```bash
-# From repo root. Fetches all 100 tickers + SPY + ^VIX into data/cache/ (≈180 MB parquet).
-python -c "
-from datetime import date
-from backtest.data import fetch_bars
-from backtest.universe import UNIVERSE_2010
-fetch_bars(UNIVERSE_2010 + ['SPY', '^VIX'], date(2010,1,1), date(2024,12,31))
-"
+# 1. yfinance daily bars for the 100-ticker universe + SPY + ^VIX (~180 MB parquet, 5-15 min)
+python -m backtest.scripts.download_cache
 
-# Run the quant backtest (reads from cache, no network needed).
-# Outputs → backtest/results/quant/{equity_curve.csv, trades.csv, metrics.json, spy_curve.csv}
+# 2. FNSPID news headlines for sentiment backtests (~23 GB transient CSV download,
+#    then sliced to ~50 MB of per-ticker parquets; raw CSV auto-deleted afterward).
+python -m backtest.scripts.download_news
+```
+
+Run the three backtests:
+
+```bash
+# Quant (momentum + mean-reversion + regime). 2010-01-01 → 2024-12-31. Fast (~5-10 min).
 python -m backtest.run_quant --positions 10 --cash 1000000
 
-# Open the results notebook
+# VADER sentiment. 2010-01-01 → 2023-12-31 (FNSPID window).
+python -m backtest.run_vader --positions 10 --cash 1000000
+
+# FinBERT sentiment. Same window as VADER. First run is slow (~hours on CPU) because
+# every distinct headline gets classified once; subsequent runs use the disk-backed
+# cache at data/cache/finbert_scores.parquet.
+python -m backtest.run_finbert --positions 10 --cash 1000000 --device cpu
+```
+
+Open the comparison notebook:
+
+```bash
 jupyter lab backtest/notebooks/results.ipynb
 ```
 
 ### Running the tests
 
 ```bash
-python3 -m pytest backtest/tests/ -q   # 269 tests, all green
+python -m pytest backtest/tests/ -q   # 461 passed, 12 skipped
 ```
 
 ### Honest disclosures
@@ -163,11 +181,16 @@ These disclosures are locked in `backtest/DESIGN.md` and are reprinted here verb
 
 5. **yfinance daily data is `auto_adjust=True`**, adjusted for dividends and splits (total-return semantics). The SPY benchmark uses the same adjustment for an apples-to-apples comparison.
 
-### Blockers
+6. **Sentiment data: FNSPID academic dataset.** VADER and FinBERT consume headlines from FNSPID (Dong et al. 2024, [arXiv:2402.06698](https://arxiv.org/abs/2402.06698), HuggingFace `Zihan1004/FNSPID`) — 15.7M timestamp-aligned headlines for 4,775 S&P 500 companies, 1999-2023. **License: CC BY-NC 4.0** (non-commercial use only). This backtest is a personal research / portfolio artifact, satisfying the license; a commercial product would require separate licensing.
 
-**VADER and FinBERT backtests (items 2.2, 2.3):** Historical news headlines aligned to daily timestamps for 100 tickers over 14 years do not exist for free. Options: (a) Polygon news API (paid), (b) GDELT (free but noisy and requires alignment work), (c) limit sentiment backtest to last 2-3 years where free sources exist, (d) report only the quant signal. Awaiting Laith's decision — see `journal/2026-05-15-pm8.md` for the full tradeoff analysis.
+7. **Window asymmetry: sentiment ends 2023-12-31** while quant uses yfinance through 2024-12-31. For apples-to-apples comparison in the notebook, the quant equity curve should be sliced to 2023-12-31 when overlaying with sentiment strategies. Pre-COVID window (2010 → Feb 2020) is unaffected.
 
-**Quant backtest network access (item 3.1):** Cloud execution environment blocks outbound HTTP to Yahoo Finance (HTTP 403). The fastest fix is to pre-download the parquet cache locally and commit it to `data/cache/`. See `journal/2026-05-15-pm9.md`.
+8. **Audit gate is open.** Phase 0/1 modules (`backtest/{engine,fills,metrics,universe,data}.py`) were initially shipped by a scheduled Claude routine. Before any number from this backtester is treated as interview-defensible, each module must clear `backtest/REVIEW_CHECKLIST.md` § for the bug-class it owns (lookahead, survivorship, fill semantics, annualization, point-in-time integrity, test depth). That work is in `backtest/TODO.md` under the **AUDIT GATE** section and is Laith-only territory; routine-drafted findings would defeat the purpose.
+
+### Status notes
+
+- The historical-news data blocker that previously gated VADER/FinBERT was resolved 2026-05-17 via FNSPID (see disclosure #6). Earlier README iterations marked these signals "blocked."
+- The cloud-routine yfinance HTTP 403 blocker only affects the scheduled cron environment, not local execution. Running locally, `python -m backtest.scripts.download_cache` populates the cache once and subsequent backtests read from disk.
 
 ---
 
