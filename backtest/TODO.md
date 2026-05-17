@@ -155,9 +155,9 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
 
 ## Phase 3 — Run + report
 
-- [blocked: cloud network policy (HTTP 403) blocks outbound yfinance requests to Yahoo Finance. To unblock: run `python -m backtest.scripts.download_cache` locally, then `git add data/cache/ && git commit && git push`. NOTE: data/cache/ was previously in .gitignore — that entry was removed 2026-05-16. A plain `git add data/cache/` now works without --force.] **3.1 — Run quant strategy end-to-end over full window.**
-- [blocked: depends on 2.2 + 2.4] **3.2 — Run VADER strategy end-to-end over 2010-2023 (FNSPID window).**
-- [blocked: depends on 2.3 + 2.4] **3.3 — Run FinBERT strategy end-to-end over 2010-2023 (FNSPID window).**
+- [~: first run (universe=100, pre-EMC-fix) shipped 2026-05-17 efca9dc / 469393f. Re-run with universe=92 (tradable_universe), wide cache, fixed _cache_covers in flight at 2026-05-17 PM under coding-agent mode as commit bechaxoq8 (background).] **3.1 — Run quant strategy end-to-end over full window.**
+- [done: 2026-05-17 PM — Sharpe 0.5857 (SE 0.0182) vs SPY 0.7879 → excess -0.20. 69 trades, hit 62%, avg holding 540d, max DD -41%. Committed 1713d79. Honest framing: VADER on FNSPID didn't generate measurable alpha.] **3.2 — Run VADER strategy end-to-end over 2010-2023 (FNSPID window).**
+- [~: end-to-end runner exists (run_finbert.py). Naive per-headline classification estimated 13h on CPU. Replaced with batched precompute (backtest/scripts/precompute_finbert.py): ~2h end-to-end then run_finbert is a pure cache-hit. Precompute running 2026-05-17 PM as bc5n7lxtl.] **3.3 — Run FinBERT strategy end-to-end over 2010-2023 (FNSPID window).**
 - [~: structure shipped; awaiting real results from 3.1/3.2/3.3 to populate] **3.4 — Build comparison notebook with equity curves, metrics tables, regime-split breakdowns.**
   - Structure already supports 3-way comparison (quant + vader + finbert) via `backtest.notebooks.nb_utils.load_strategy_results`. Empty-CSV state degrades gracefully (shows "no results yet" placeholders).
   - Disclosures section updated 2026-05-17 PM to reflect FNSPID source (CC BY-NC license), window asymmetry (FNSPID 2010-2023 vs quant 2010-2024), and FinBERT/VADER threshold parity with live bot.
@@ -171,6 +171,14 @@ Each audit item: Laith reads the code, runs the checklist section, writes findin
 - [done: 2026-05-17 PM — run_quant produces spy_curve.csv and metrics.json includes benchmark.{full_window,pre_covid,post_covid} blocks with Sharpe/MaxDD/Total-Return/CAGR. run_vader and run_finbert follow the same pattern.] **4.1 — Add benchmark vs SPY buy-and-hold.**
 - [blocked: depends on 3.1 — `backtest/robustness.py` module exists with passing tests on synthetic data, but no robustness CHECKS have been run against a real strategy run. Previously marked [done] by routine prematurely.] **4.2 — Robustness checks: parameter sensitivity, walk-forward window, monte-carlo on trade ordering.**
 - [~: re-exported 2026-05-17 PM with quant results landed (559 KB HTML, real content); needs re-export after VADER + FinBERT runs complete to include all three signal sources] **4.3 — Export static HTML of the notebook for portfolio site.**
+
+## Phase 5 — Dashboard + paper trading (post-backtest)
+
+Goal locked 2026-05-17 PM under coding-agent override: finish backtests → paper trading with the three strategies → display on a dashboard.
+
+- [done: 2026-05-17 PM — backend/dashboard.py + register_dashboard(app), routes /api/strategies/{quant,vader,finbert} + /dashboard HTML. Self-contained dark-theme page with Chart.js via CDN (no Next.js, no build step). 8/8 tests. Commit 4b00901.] **5.1 — Strategy dashboard MVP (backtest read-only).**
+- [ ] **5.2 — Per-strategy paper trading harness.** Open architectural questions: (a) extend existing live bot (StreamIngestor + signal_bus) with source attribution, OR (b) run three separate paper bots each consuming one source. Sentiment paper requires LIVE news (not FNSPID — that ends 2023-12-31), so plumbing is non-trivial. Consult LLM council before implementation. Dashboard already has a stub section.
+- [ ] **5.3 — Hook paper portfolios into dashboard.** /api/paper/{strategy} reading from data/paper/{strategy}/. Dashboard already has placeholder cards.
 
 ---
 
