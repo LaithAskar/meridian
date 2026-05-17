@@ -116,3 +116,34 @@ class TestRoutes:
         assert "chart.js" in body.lower()
         for s in STRATEGIES:
             assert s in body  # strategy names appear in the JS code at minimum
+
+    def test_paper_endpoint_returns_200_for_each_strategy(self):
+        app = _make_app()
+        for s in STRATEGIES:
+            r = _run(_get(app, f"/api/paper/{s}"))
+            assert r.status_code == 200, f"{s}: {r.text}"
+            j = r.json()
+            assert j["strategy"] == s
+            assert j["mode"] == "paper"
+            # No paper data has been generated yet — every strategy degrades
+            # to no_results, but the schema must stay stable.
+            assert j["metrics"]["status"] in ("ok", "no_results", "error")
+            assert isinstance(j["equity"], list)
+            assert isinstance(j["trades"], list)
+
+    def test_paper_all_endpoint(self):
+        app = _make_app()
+        r = _run(_get(app, "/api/paper"))
+        assert r.status_code == 200
+        payload = r.json()
+        for s in STRATEGIES:
+            assert s in payload
+            assert payload[s]["mode"] == "paper"
+
+    def test_dashboard_html_contains_paper_section(self):
+        app = _make_app()
+        r = _run(_get(app, "/dashboard"))
+        assert r.status_code == 200
+        body = r.text
+        assert "paper-grid" in body
+        assert "paper trading" in body.lower()

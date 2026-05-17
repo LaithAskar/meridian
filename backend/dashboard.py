@@ -31,25 +31,33 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _RESULTS_DIR = _REPO_ROOT / "backtest" / "results"
+_PAPER_DIR = _REPO_ROOT / "data" / "paper"
 
 STRATEGIES = ("quant", "vader", "finbert")
 
 
-def _read_metrics(strategy: str) -> dict[str, Any]:
-    path = _RESULTS_DIR / strategy / "metrics.json"
+def _base_dir(mode: str) -> Path:
+    """Return the results-vs-paper base directory."""
+    if mode == "paper":
+        return _PAPER_DIR
+    return _RESULTS_DIR
+
+
+def _read_metrics(strategy: str, mode: str = "backtest") -> dict[str, Any]:
+    path = _base_dir(mode) / strategy / "metrics.json"
     if not path.exists():
-        return {"status": "no_results", "strategy": strategy}
+        return {"status": "no_results", "strategy": strategy, "mode": mode}
     try:
         with open(path) as fh:
-            return {"status": "ok", "strategy": strategy, **json.load(fh)}
+            return {"status": "ok", "strategy": strategy, "mode": mode, **json.load(fh)}
     except Exception as exc:
-        logger.warning("Failed to read metrics for %s: %s", strategy, exc)
-        return {"status": "error", "strategy": strategy, "error": str(exc)}
+        logger.warning("Failed to read metrics for %s (%s): %s", strategy, mode, exc)
+        return {"status": "error", "strategy": strategy, "mode": mode, "error": str(exc)}
 
 
-def _read_curve(strategy: str, filename: str, downsample: int = 1) -> list[dict]:
+def _read_curve(strategy: str, filename: str, downsample: int = 1, mode: str = "backtest") -> list[dict]:
     """Read an equity-curve CSV. Optionally take every Nth row for plotting speed."""
-    path = _RESULTS_DIR / strategy / filename
+    path = _base_dir(mode) / strategy / filename
     if not path.exists():
         return []
     try:
@@ -67,8 +75,8 @@ def _read_curve(strategy: str, filename: str, downsample: int = 1) -> list[dict]
         return []
 
 
-def _read_trades(strategy: str, limit: int = 50) -> list[dict]:
-    path = _RESULTS_DIR / strategy / "trades.csv"
+def _read_trades(strategy: str, limit: int = 50, mode: str = "backtest") -> list[dict]:
+    path = _base_dir(mode) / strategy / "trades.csv"
     if not path.exists():
         return []
     try:
@@ -84,16 +92,27 @@ def _read_trades(strategy: str, limit: int = 50) -> list[dict]:
         return []
 
 
-def get_strategy_payload(strategy: str, curve_downsample: int = 7) -> dict[str, Any]:
-    """Aggregate metrics + equity curve + SPY benchmark + recent trades for one strategy."""
+def get_strategy_payload(
+    strategy: str,
+    mode: str = "backtest",
+    curve_downsample: int = 7,
+) -> dict[str, Any]:
+    """Aggregate metrics + equity curve + SPY benchmark + recent trades for one strategy.
+
+    Set ``mode='paper'`` to read from ``data/paper/{strategy}/`` instead of
+    ``backtest/results/{strategy}/``.
+    """
     if strategy not in STRATEGIES:
         raise HTTPException(status_code=404, detail=f"unknown strategy: {strategy}")
+    if mode not in ("backtest", "paper"):
+        raise HTTPException(status_code=400, detail=f"unknown mode: {mode}")
     return {
         "strategy": strategy,
-        "metrics":   _read_metrics(strategy),
-        "equity":    _read_curve(strategy, "equity_curve.csv", downsample=curve_downsample),
-        "benchmark": _read_curve(strategy, "spy_curve.csv",    downsample=curve_downsample),
-        "trades":    _read_trades(strategy, limit=20),
+        "mode":     mode,
+        "metrics":   _read_metrics(strategy, mode=mode),
+        "equity":    _read_curve(strategy, "equity_curve.csv", downsample=curve_downsample, mode=mode),
+        "benchmark": _read_curve(strategy, "spy_curve.csv",    downsample=curve_downsample, mode=mode),
+        "trades":    _read_trades(strategy, limit=20, mode=mode),
     }
 
 
@@ -148,10 +167,8 @@ _DASHBOARD_HTML = """<!doctype html>
   <div class=\"section-title\">Backtest results</div>
   <div class=\"grid\" id=\"backtest-grid\"></div>
 
-  <div class=\"section-title\">Paper trading <span class=\"pill stub\">stub</span></div>
-  <div class=\"grid\" id=\"paper-grid\">
-    <div class=\"card placeholder\">Paper harness not yet wired. Will mirror backtest layout once per-strategy live virtual portfolios are running.</div>
-  </div>
+  <div class=\"section-title\">Paper trading <span class=\"pill paper\">forward-extended</span></div>
+  <div class=\"grid\" id=\"paper-grid\"></div>
 
 <script>
 const STRATEGIES = ['quant', 'vader', 'finbert'];
@@ -162,16 +179,24 @@ function fmtX(x) { if (x == null || isNaN(x)) return '—'; return Number(x).toF
 function fmtSigned(x) { if (x == null || isNaN(x)) return '—'; const v = Number(x); return (v >= 0 ? '+' : '') + v.toFixed(3); }
 function colorClass(v, neutral) { if (v == null || isNaN(v)) return ''; if (neutral) return ''; return v >= 0 ? 'good' : 'bad'; }
 
-async function loadStrategy(strategy) {
-  const r = await fetch('/api/strategies/' + strategy);
-  if (!r.ok) throw new Error(strategy + ': ' + r.status);
+async function loadStrategy(strategy, mode) {
+  const url = mode === 'paper' ? '/api/paper/' + strategy : '/api/strategies/' + strategy;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(strategy + ' (' + mode + '): ' + r.status);
   return await r.json();
 }
 
 function renderCard(payload) {
   const m = payload.metrics || {};
+  const mode = payload.mode || 'backtest';
+  const modePill = mode === 'paper'
+    ? '<span class=\"pill live\">paper</span>'
+    : '<span class=\"pill paper\">backtest</span>';
   if (m.status !== 'ok') {
-    return '<div class=\"card\"><h2>' + payload.strategy + '</h2><div class=\"placeholder\">No results yet (status: ' + (m.status || 'unknown') + ')</div></div>';
+    const msg = mode === 'paper'
+      ? 'No paper data yet — run <code>python -m backend.paper_trader --strategy ' + payload.strategy + '</code> to populate.'
+      : 'No results yet (status: ' + (m.status || 'unknown') + ')';
+    return '<div class=\"card\"><h2>' + payload.strategy + ' ' + modePill + '</h2><div class=\"placeholder\">' + msg + '</div></div>';
   }
   const fw = m.full_window || {};
   const bm = m.benchmark && m.benchmark.full_window ? m.benchmark.full_window : {};
@@ -200,18 +225,20 @@ function renderCard(payload) {
   }
 
   const startDate = m.parameters ? m.parameters.start : '';
-  const endDate = m.parameters ? m.parameters.end : '';
+  const endDate = m.paper_end || (m.parameters ? m.parameters.end : '');
+  const limitNote = m.data_limit_note ? `<div class=\"strategy-sub\" style=\"color:#d29922\">⚠ ${m.data_limit_note}</div>` : '';
   return `
     <div class=\"card\">
-      <h2>${payload.strategy} <span class=\"pill paper\">backtest</span></h2>
+      <h2>${payload.strategy} ${modePill}</h2>
       <div class=\"strategy-sub\">${startDate} → ${endDate} · ${m.parameters && m.parameters.universe_size ? m.parameters.universe_size + ' symbols' : ''}</div>
+      ${limitNote}
       ${kpis}
-      <div class=\"chart-wrap\"><canvas id=\"chart-${payload.strategy}\"></canvas></div>
+      <div class=\"chart-wrap\"><canvas id=\"chart-${mode}-${payload.strategy}\"></canvas></div>
       ${tradesHtml}
     </div>`;
 }
 
-function makeChart(canvasId, payload) {
+function makeChart(canvasId, payload, accentColor) {
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
   const ds = [];
@@ -219,7 +246,7 @@ function makeChart(canvasId, payload) {
     ds.push({
       label: 'strategy',
       data: payload.equity.map(p => ({ x: p.ts, y: p.equity })),
-      borderColor: '#58a6ff', borderWidth: 1.5, pointRadius: 0, tension: 0.1, fill: false,
+      borderColor: accentColor || '#58a6ff', borderWidth: 1.5, pointRadius: 0, tension: 0.1, fill: false,
     });
   }
   if (payload.benchmark && payload.benchmark.length) {
@@ -243,11 +270,22 @@ function makeChart(canvasId, payload) {
   });
 }
 
-(async function init() {
-  const grid = document.getElementById('backtest-grid');
-  const payloads = await Promise.all(STRATEGIES.map(s => loadStrategy(s).catch(e => ({ strategy: s, metrics: { status: 'error', error: e.message } }))));
+async function renderSection(gridId, mode, accent) {
+  const grid = document.getElementById(gridId);
+  const payloads = await Promise.all(
+    STRATEGIES.map(s =>
+      loadStrategy(s, mode).catch(e => ({ strategy: s, mode: mode, metrics: { status: 'error', error: e.message } }))
+    )
+  );
   grid.innerHTML = payloads.map(renderCard).join('');
-  for (const p of payloads) makeChart('chart-' + p.strategy, p);
+  for (const p of payloads) makeChart('chart-' + mode + '-' + p.strategy, p, accent);
+}
+
+(async function init() {
+  await Promise.all([
+    renderSection('backtest-grid', 'backtest', '#58a6ff'),
+    renderSection('paper-grid',    'paper',    '#3fb950'),
+  ]);
 })();
 </script>
 </body>
@@ -260,11 +298,19 @@ def register_dashboard(app: FastAPI) -> None:
 
     @app.get("/api/strategies/{strategy}")
     def api_strategy(strategy: str):
-        return get_strategy_payload(strategy)
+        return get_strategy_payload(strategy, mode="backtest")
 
     @app.get("/api/strategies")
     def api_all_strategies():
-        return {s: get_strategy_payload(s) for s in STRATEGIES}
+        return {s: get_strategy_payload(s, mode="backtest") for s in STRATEGIES}
+
+    @app.get("/api/paper/{strategy}")
+    def api_paper_strategy(strategy: str):
+        return get_strategy_payload(strategy, mode="paper")
+
+    @app.get("/api/paper")
+    def api_all_paper():
+        return {s: get_strategy_payload(s, mode="paper") for s in STRATEGIES}
 
     @app.get("/dashboard", response_class=HTMLResponse)
     def dashboard():
