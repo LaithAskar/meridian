@@ -38,8 +38,10 @@ the current symbol (same CUSIP, new name):
                                      in April 2014.  yfinance carries full history
                                      under GOOGL back to 2004 IPO.
   WBA     WAG (Walgreen Co.)         Walgreens Boots Alliance formed Mar 2014,
-                                     WAG delisted / WBA listed Dec 2014.  yfinance
-                                     carries WBA history back through the WAG era.
+                                     WAG delisted / WBA listed Dec 2014.  As of
+                                     2026-05-17 yfinance returns HTTP 404 for WBA
+                                     entirely — historical price feed dropped post-
+                                     delisting.  WBA is in KNOWN_NO_DATA; see below.
   ELV     WLP (WellPoint Inc.)       WellPoint → Anthem (ANTM) Dec 2014 →
                                      Elevance Health (ELV) Jun 2022.  yfinance
                                      carries ELV history through all name changes.
@@ -63,8 +65,9 @@ treats missing bars as "no position" for that symbol from that point onward.
   KFT     Split into Mondelez (MDLZ) + Kraft Foods      ~Oct 2012
           Group (KRFT); KRFT later merged into KHC
   MON     Acquired by Bayer AG                          ~Jun 2018
-  MRO     Marathon Oil spun off Marathon Petroleum       MRO continues as
-          (MPC) Jun 2011; MRO becomes pure-play E&P      upstream-only E&P
+  MRO     Marathon Oil spun off Marathon Petroleum       yfinance returns empty
+          (MPC) Jun 2011; MRO becomes pure-play E&P      as of 2026-05-17 — in
+                                                         KNOWN_NO_DATA (see below)
   RTN     Merged with UTX to form Raytheon (RTX)        ~Apr 2020
   S       Sprint Nextel merged into T-Mobile            ~Apr 2020
   TWX     Acquired by AT&T                              ~Jun 2018

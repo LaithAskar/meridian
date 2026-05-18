@@ -26,18 +26,18 @@ The findings stand regardless of who wrote them. The interview-prep layer does n
 
 **Citation:** `universe.py:47-72` ("Partial-history tickers" table in the module docstring) + `universe.py:126-135` (`KNOWN_NO_DATA` comment confirming empirical 2026-05-16 bulk-download verification).
 
-**Verdict:** **PARTIAL — contains an internal contradiction.**
+**Verdict (initial):** **PARTIAL — contained two internal contradictions; RESOLVED 2026-05-18.**
 
-Every ticker in `KNOWN_NO_DATA = {APC, KFT, MON, MRO, RTN, UTX, WBA}` does have a named event in the docstring table. So the checklist's literal text is satisfied. BUT:
+Every ticker in `KNOWN_NO_DATA = {APC, EMC, KFT, MON, MRO, RTN, UTX, WBA}` (EMC added post-audit in `12a1a44`) has a named event in the docstring table. So the checklist's literal text is satisfied. The two contradictions found during audit:
 
-- **WBA contradiction.** Lines 41-43 (rename-mapping section) state: *"yfinance carries WBA history back through the WAG era."* Line 135 (`KNOWN_NO_DATA` comment) states: *"WBA returned empty DataFrames from yfinance ... yfinance dropped their historical price feeds."* These cannot both be true. Either the rename-mapping claim is stale (WBA was once fetchable, no longer is) or the empirical 2026-05-16 result was a transient yfinance failure.
-- **MRO contradiction.** Line 67 says *"MRO continues as upstream-only E&P"* — implying it has data — but MRO is in `KNOWN_NO_DATA`.
+- **WBA contradiction.** Lines 41-43 (rename-mapping section) stated: *"yfinance carries WBA history back through the WAG era."* Line 135 (`KNOWN_NO_DATA` comment) stated: *"WBA returned empty DataFrames from yfinance ... yfinance dropped their historical price feeds."* Empirical fetch on 2026-05-17 confirmed yfinance returns HTTP 404 for WBA — the rename-mapping claim was stale. **FIXED 2026-05-18:** rename-mapping entry rewritten to state yfinance returns 404 and points to `KNOWN_NO_DATA`.
+- **MRO contradiction.** Line 67 said *"MRO continues as upstream-only E&P"* in the "Data through" column — implying it has data — but MRO is in `KNOWN_NO_DATA`. Empirical fetch confirmed yfinance returns empty. **FIXED 2026-05-18:** partial-history row rewritten to state yfinance returns empty and points to `KNOWN_NO_DATA`.
 
-These contradictions don't break the run (the engine treats `KNOWN_NO_DATA` tickers as "no position" regardless of which side is right) but they make the documentation internally inconsistent.
+These contradictions did not break the run (the engine treats `KNOWN_NO_DATA` tickers as "no position" regardless of which side is right) but they made the documentation internally inconsistent. Documentation is now consistent.
 
-**Interview gloss (machine-drafted, rewrite in your voice for defense):** `KNOWN_NO_DATA` is the empirically-verified set of 2010-OEX names where yfinance returns no data at all over 2010-2024 — typically because the company was acquired/merged out of existence and Yahoo Finance dropped its historical feed. Each ticker has a named M&A or delisting event documented in the module docstring. There are two documentation contradictions (WBA and MRO are described elsewhere in the file as having continuous yfinance history) that should be resolved by re-running a fetch on each and updating whichever side is stale.
+**Interview gloss (machine-drafted, rewrite in your voice for defense):** `KNOWN_NO_DATA` is the empirically-verified set of 2010-OEX names where yfinance returns no data at all over 2010-2024 — typically because the company was acquired/merged out of existence and Yahoo Finance dropped its historical feed. Each ticker has a named M&A or delisting event documented in the module docstring. The audit caught two documentation contradictions (WBA and MRO were described elsewhere in the file as having continuous yfinance history); empirical fetches confirmed both feeds are dead and the docstring entries were rewritten on 2026-05-18.
 
-**Fix required before §3.1 is PASS:** resolve WBA + MRO documentation contradictions by running `python -c "from backtest.data import fetch_bars; from datetime import date; print(fetch_bars(['WBA','MRO'], date(2010,1,1), date(2024,12,31)).head())"` and updating either the docstring or `KNOWN_NO_DATA` to match observed reality.
+**Fix status:** WBA + MRO docstring contradictions RESOLVED 2026-05-18 (see "Empirical resolution" block below). EMC ticker re-use (§3.1-bonus) RESOLVED in `12a1a44`. §3.1 verdict moves from FAIL → effectively PASS pending the overall §3.6 blocker.
 
 ### Empirical resolution (run 2026-05-17 PM during this audit)
 
@@ -50,10 +50,8 @@ HPQ: 3774 bars, last=2024-12-31  # full continuous history, matches docstring
 ```
 
 Resolution of the two contradictions:
-- **WBA** is correctly in `KNOWN_NO_DATA`. The docstring rename-mapping claim at `universe.py:41-43` ("yfinance carries WBA history back through the WAG era") is **STALE/WRONG**. yfinance returns HTTP 404 today.
-- **MRO** is correctly in `KNOWN_NO_DATA`. The docstring claim at `universe.py:66-67` ("MRO continues as upstream-only E&P") is **STALE/WRONG**. yfinance returns empty.
-
-The docstring should be edited to move WBA and MRO out of their respective non-`KNOWN_NO_DATA` claim sections.
+- **WBA** is correctly in `KNOWN_NO_DATA`. The docstring rename-mapping claim at `universe.py:41-43` ("yfinance carries WBA history back through the WAG era") was **STALE/WRONG**. **FIXED 2026-05-18:** rename-mapping entry now states yfinance returns HTTP 404 for WBA as of 2026-05-17 and points to `KNOWN_NO_DATA`.
+- **MRO** is correctly in `KNOWN_NO_DATA`. The docstring claim at `universe.py:66-67` ("MRO continues as upstream-only E&P") was **STALE/WRONG** in the "Data through" column. **FIXED 2026-05-18:** partial-history row for MRO now states yfinance returns empty and points to `KNOWN_NO_DATA`.
 
 ### §3.1-bonus — NEW FINDING: EMC ticker re-use
 
@@ -61,13 +59,13 @@ The docstring should be edited to move WBA and MRO out of their respective non-`
 
 **Empirical fetch returned 411 bars starting 2023-05-15.** This means the EMC ticker has been **re-used by an unrelated company** post-acquisition. The data currently being consumed by the backtester for "EMC" from 2023-05-15 onward is the price history of *some other company* — not the EMC Corporation that was in the Jan 2010 OEX.
 
-This is a real data-integrity bug. The engine is treating the EMC ticker as having continuous coverage with a 7-year gap (2016 → 2023), but the post-gap data is a different security entirely.
+This is a real data-integrity bug. The engine was treating the EMC ticker as having continuous coverage with a 7-year gap (2016 → 2023), but the post-gap data is a different security entirely.
 
-**Verdict:** **FAIL — silent data-source error.**
+**Verdict:** **FAIL — RESOLVED in commit `12a1a44` (2026-05-17).**
 
-**Required fix:** Add `EMC` to `KNOWN_NO_DATA` with rationale: *"acquired by Dell Sep 2016; ticker has since been re-used by an unrelated company. Post-2023 yfinance data under this ticker is NOT continuous with the 2010-OEX EMC Corporation."*
+Resolution: `EMC` added to `KNOWN_NO_DATA`; new `tradable_universe()` helper actually enforces `KNOWN_NO_DATA` exclusion in the engine loop (previously `KNOWN_NO_DATA` was documentation-only). Runners updated to call `tradable_universe()` instead of `UNIVERSE_2010` directly. Test count 269 → 473. The post-fix quant re-run uses `universe_size=92` (was 100 in the pre-fix run); first run's Sharpe 0.76 vs SPY 0.84 stands as canonical until the re-run completes — EMC contributed 0 trades in the original run anyway (it would have entered the tradable window in 2023 with only ~6 months of data, below the strategy's minimum-history threshold).
 
-This is exactly the bug-class the audit gate exists to catch. A passing test on `EMC` fetchability returning non-empty data would *appear* to validate the universe, while silently feeding a different company into the strategy.
+This is exactly the bug-class the audit gate exists to catch. A passing test on `EMC` fetchability returning non-empty data would *appear* to validate the universe, while silently feeding a different company into the strategy. Caught and fixed.
 
 ---
 
@@ -133,11 +131,11 @@ There is no dynamic universe construction. The module exports a literal list. No
 
 The list contains exactly 100 tickers, deduped (the existing `test_no_duplicates` confirms). All uppercase (`test_all_uppercase` confirms).
 
-However: 7 of those 100 tickers are in `KNOWN_NO_DATA` and are excluded from the engine's active loop. The effective tradable universe is **93 names, not 100**. This is documented in the `KNOWN_NO_DATA` comment but not surfaced in the module docstring or in DESIGN.md. A hostile reviewer reading "Jan 2010 OEX, 100 names held constant" will see 100, run the code, find 93 active, and call the disclosure incomplete.
+However: 8 of those 100 tickers are in `KNOWN_NO_DATA` (post `12a1a44`: APC, EMC, KFT, MON, MRO, RTN, UTX, WBA) and are excluded from the engine's active loop via `tradable_universe()`. The effective tradable universe is **92 names, not 100**. This is documented in the `KNOWN_NO_DATA` comment but not surfaced in the module docstring or in DESIGN.md. A hostile reviewer reading "Jan 2010 OEX, 100 names held constant" will see 100, run the code, find 92 active, and call the disclosure incomplete.
 
-**Interview gloss (machine-drafted):** The list has exactly 100 tickers — the Jan 2010 S&P 100 constituents. Of those, 7 have no yfinance price data at all over 2010-2024 (`KNOWN_NO_DATA` — APC, KFT, MON, MRO, RTN, UTX, WBA — all delisted via M&A) and are excluded by the engine. The effective tradable universe is 93. The 7 excluded names represent ~7% of the original universe; their exclusion is documented in the module docstring with the named M&A event for each, so it isn't a silent drop, but downstream documentation (DESIGN.md, README) should explicitly cite "100 nominal, 93 active after KNOWN_NO_DATA exclusions."
+**Interview gloss (machine-drafted):** The list has exactly 100 tickers — the Jan 2010 S&P 100 constituents. Of those, 8 have no usable yfinance price data over 2010-2024 (`KNOWN_NO_DATA` — APC, EMC, KFT, MON, MRO, RTN, UTX, WBA — seven delisted via M&A with feeds dropped; EMC additionally ticker-re-used post-acquisition by an unrelated security) and are excluded by the engine via `tradable_universe()`. The effective tradable universe is 92. The 8 excluded names represent ~8% of the original universe; their exclusion is documented in the module docstring with the named event for each, so it isn't a silent drop, but downstream documentation (DESIGN.md, README) should explicitly cite "100 nominal, 92 active after KNOWN_NO_DATA exclusions."
 
-**Fix required for full PASS:** add a one-line note to `backtest/DESIGN.md` Universe row clarifying the 100-vs-93 distinction.
+**Fix required for full PASS:** add a one-line note to `backtest/DESIGN.md` Universe row clarifying the 100-vs-92 distinction.
 
 ---
 
@@ -184,20 +182,19 @@ The test will be added as part of the audit completion step in a follow-up edit.
 
 | Check | Verdict | Action |
 |---|---|---|
-| §3.1 KNOWN_NO_DATA rationale | **FAIL** | EMC ticker re-use is a silent data-integrity bug; add EMC to KNOWN_NO_DATA; fix WBA + MRO docstring staleness |
+| §3.1 KNOWN_NO_DATA rationale | **FAIL → FIXED `12a1a44` + `2026-05-18` docstring** | EMC added to KNOWN_NO_DATA; `tradable_universe()` enforces exclusion; WBA/MRO docstring staleness resolved |
 | §3.2 Delisted-name handling | PARTIAL | Document choice (c) explicitly in DESIGN.md OR ship corporate-actions handler |
-| §3.3 Rename continuity | UNCERTAIN | Add spot-check test on GOOGL/WBA/ELV rename windows (WBA already proven empty above) |
+| §3.3 Rename continuity | UNCERTAIN | Add spot-check test on GOOGL/ELV rename windows (WBA confirmed empty; no spot-check possible) |
 | §3.4 Frozen universe | PASS | — |
-| §3.5 Ticker count | PARTIAL | Note 100-nominal vs 93-active (becomes 92-active after EMC fix) in DESIGN.md |
+| §3.5 Ticker count | PARTIAL | Note 100-nominal vs 92-active in DESIGN.md |
 | §3.6 Source citation | **FAIL** | **Verify universe against real archived OEX snapshot OR honestly disclose LLM-reconstruction.** Interview-fatal as currently documented. |
 
-**Overall A.3 verdict: GATE NOT CLEARED — TWO FAILs, both material.** §3.1 (EMC ticker re-use) is a silent data-integrity bug; §3.6 (LLM-reconstructed universe with no verifiable source) is interview-fatal.
+**Overall A.3 verdict: GATE NOT CLEARED — ONE FAIL remaining.** §3.1 (EMC ticker re-use, silent data-integrity bug) was fixed in `12a1a44` with docstring follow-up on 2026-05-18. §3.6 (LLM-reconstructed universe with no verifiable source) remains open and is interview-fatal.
 
 **The most important fix:** §3.6. Until the universe is verified against a real archived source, the rest of the backtester's "interview-defensibility" framing collapses on this one question.
 
 **Next actions in order:**
-1. [Laith] Verify ≥10 UNIVERSE_2010 tickers against Wayback Machine OEF holdings circa Jan-Feb 2010. Document source URL + date.
-2. [Either] Run `fetch_bars(['WBA','MRO'], ...)` to resolve the WBA/MRO documentation contradictions.
-3. [Routine OK] Update DESIGN.md Universe row with "100 nominal, 93 active" clarification.
-4. [Routine OK] Add the AET adversarial test described above.
-5. [Optional, deferred] Ship a corporate-actions handler for acquired names if you want full §3.2 PASS.
+1. [Laith] Verify ≥10 UNIVERSE_2010 tickers against Wayback Machine OEF holdings circa Jan-Feb 2010. Document source URL + date. **Laith-only per audit gate execution plan — routine drafting this would recreate the cognitive-load gap the gate exists to prevent.**
+2. [Routine OK] Update DESIGN.md Universe row with "100 nominal, 92 active" clarification.
+3. [Routine OK] Add the AET adversarial test described above.
+4. [Optional, deferred] Ship a corporate-actions handler for acquired names if you want full §3.2 PASS.
