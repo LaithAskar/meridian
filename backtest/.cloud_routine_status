@@ -1,1 +1,21 @@
 started 2026-05-21T22:18:01Z
+FAILED 2026-05-21T22:35:00Z
+
+Failure: HuggingFace blocked (403 Forbidden) — cannot download ProsusAI/finbert model weights.
+
+Every request to https://huggingface.co returns HTTP 403 Forbidden from this cloud IP.
+This is a network-level block, not an authentication issue — no HF_TOKEN is available
+and even unauthenticated HEAD requests to public model pages are rejected.
+
+Verified:
+  - git push works (canary committed + pushed: ba861d2)
+  - pip install succeeded: torch 2.12.0+cu130, transformers 5.9.0, pandas 3.0.3
+  - Existing cache is intact: 142,188 rows in data/cache/finbert_scores.parquet
+  - 198,652 headlines still require classification
+  - Precompute fails at: AutoTokenizer.from_pretrained("ProsusAI/finbert")
+
+To unblock: provide HF_TOKEN env var pointing to a token with model read access,
+OR pre-download model weights locally and commit to repo (or a separate LFS store),
+OR run precompute from an environment with unrestricted outbound HTTPS.
+
+Cache unchanged at 142,188 rows (41.9% of ~339,740 unique headlines).
