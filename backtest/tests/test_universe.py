@@ -16,12 +16,20 @@ Fetchability tests (monkeypatched — no network):
 
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 import yfinance as yf
 
+import backtest.engine as _engine_mod
+from backtest.engine import Engine
+from backtest.strategy import Order, Strategy
 from backtest.universe import KNOWN_NO_DATA, UNIVERSE_2010
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -111,6 +119,123 @@ class TestUniverse2010Structure:
             assert t in UNIVERSE_2010, (
                 f"{t!r} should be in UNIVERSE_2010 (was in Jan 2010 OEX) but is missing"
             )
+
+
+class _BuyAETAndTraceStrategy(Strategy):
+    """Open a real engine position in AET and record its observable lifecycle."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ordered = False
+        self.trace: list[dict[str, object]] = []
+
+    def on_bar(self, ts, bars, portfolio) -> list[Order]:
+        position = portfolio.positions.get("AET")
+        self.trace.append({
+            "ts": pd.Timestamp(ts),
+            "has_bar": "AET" in bars,
+            "has_position": position is not None,
+            "qty": position.qty if position is not None else 0.0,
+            "avg_cost": position.avg_cost if position is not None else pd.NA,
+        })
+        if not self._ordered and "AET" in bars:
+            self._ordered = True
+            return [Order("AET", "buy", 10.0)]
+        return []
+
+
+def _tracked_symbol_bars(symbol: str) -> pd.DataFrame:
+    """Load one repository-tracked parquet as engine-format fixture bars."""
+    path = _REPO_ROOT / "data" / "cache" / f"{symbol}_1d.parquet"
+    assert path.is_file(), f"Tracked {symbol} engine fixture is missing: {path}"
+    frame = pd.read_parquet(path).copy()
+    assert isinstance(frame.index, pd.DatetimeIndex)
+    frame.index = pd.MultiIndex.from_arrays(
+        [[symbol] * len(frame), frame.index], names=["symbol", "date"]
+    )
+    return frame
+
+
+def _run_tracked_aet_position(monkeypatch):
+    """Run the production engine over tracked AET + SPY bars, without network."""
+    bars = pd.concat([
+        _tracked_symbol_bars("AET"),
+        _tracked_symbol_bars("SPY"),
+    ]).sort_index()
+    monkeypatch.setattr(_engine_mod, "fetch_bars", lambda *args, **kwargs: bars)
+
+    strategy = _BuyAETAndTraceStrategy()
+    result = Engine(
+        strategy=strategy,
+        universe=["AET", "SPY"],
+        start=date(2010, 1, 1),
+        end=date(2024, 12, 31),
+        initial_cash=10_000.0,
+    ).run()
+    return bars.xs("AET", level="symbol"), pd.DataFrame(strategy.trace).set_index("ts"), result
+
+
+class TestTrackedDelistingEvidence:
+    def test_aet_has_continuous_position_trace_through_delisting(self, monkeypatch):
+        """Expose AET's real engine lifecycle; this is evidence, not clearance.
+
+        SPY supplies the post-acquisition engine clock after AET bars stop.  The
+        assertions deliberately record today's unresolved behavior: AET stays
+        in the portfolio, while the missing-price branch marks it at average
+        cost.  That conflicts with DESIGN's acquisition-price treatment.
+        """
+        aet, trace, result = _run_tracked_aet_position(monkeypatch)
+
+        assert "AET" in UNIVERSE_2010
+        assert "AET" not in KNOWN_NO_DATA
+        assert not aet.empty, "AET is silently absent from tracked engine input"
+        assert aet.index.min() <= pd.Timestamp("2010-01-11")
+        assert pd.Timestamp("2018-09-01") <= aet.index.max() <= pd.Timestamp("2019-01-01")
+        assert len(aet) >= 2_200, "AET lacks meaningful daily coverage"
+        assert aet.index.nunique() == len(aet)
+        assert not aet[["open", "high", "low", "close"]].isna().any().any()
+        annual_counts = aet.groupby(aet.index.year).size()
+        assert set(range(2010, 2019)) <= set(annual_counts.index)
+        assert (annual_counts.loc[2010:2017] >= 240).all()
+
+        last_aet_ts = aet.index.max()
+        first_missing_ts = trace.index[trace.index > last_aet_ts][0]
+        assert trace.loc[last_aet_ts, "has_bar"] == True  # noqa: E712
+        assert trace.loc[last_aet_ts, "has_position"] == True  # noqa: E712
+        assert trace.loc[first_missing_ts, "has_bar"] == False  # noqa: E712
+        assert trace.loc[first_missing_ts, "has_position"] == True  # noqa: E712
+        assert trace.loc[pd.Timestamp("2018-12-31"), "has_position"] == True  # noqa: E712
+
+        qty = float(trace.loc[first_missing_ts, "qty"])
+        avg_cost = float(trace.loc[first_missing_ts, "avg_cost"])
+        cash = float(result.equity_curve.loc[first_missing_ts, "cash"])
+        assert result.equity_curve.loc[first_missing_ts, "num_positions"] == 1
+        assert result.equity_curve.loc[first_missing_ts, "equity"] == pytest.approx(
+            cash + qty * avg_cost
+        ), "Engine no longer exposes the documented missing-price cost fallback"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "A.3 BLOCKER: DESIGN requires acquisition-price treatment, but the engine "
+            "carries AET at average cost after its final bar. A human must verify the "
+            "corporate-action proceeds/fixture and choose the post-event rule before unxfail."
+        ),
+    )
+    def test_aet_post_delisting_value_matches_locked_acquisition_treatment(self, monkeypatch):
+        """Desired DESIGN behavior, kept strict-xfail so A.3 cannot falsely pass."""
+        aet, trace, result = _run_tracked_aet_position(monkeypatch)
+        first_missing_ts = trace.index[trace.index > aet.index.max()][0]
+        qty = float(trace.loc[first_missing_ts, "qty"])
+        cash = float(result.equity_curve.loc[first_missing_ts, "cash"])
+
+        # The final tracked bar is in the documented acquisition window, but a
+        # human must still verify that its adjusted close is the correct payout
+        # proxy (or replace it with a reviewed corporate-action fixture).
+        acquisition_window_value = float(aet.iloc[-1]["close"])
+        assert result.equity_curve.loc[first_missing_ts, "equity"] == pytest.approx(
+            cash + qty * acquisition_window_value
+        )
 
 
 # ---------------------------------------------------------------------------
