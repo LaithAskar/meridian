@@ -1,4 +1,4 @@
-# Hostile-Review Checklist — Meridian Backtester
+    # Hostile-Review Checklist — Meridian Backtester
 
 **Purpose:** scan routine-produced code for the bug classes that pass syntactic tests but break interview defensibility. Run this against every `[routine]` commit touching `engine.py`, `fills.py`, `metrics.py`, `universe.py`, or `data.py` before allowing dependent Phase 2/3 work to proceed.
 

@@ -14,7 +14,18 @@ By **July 31, 2026**, Meridian has shipped:
 - **Measured Sharpe, max DD, hit rate, exposure** per signal source (FinBERT, VADER, quant) over pre/post-COVID regime split
 - Static results notebook (no React, no web UI)
 - README with measured numbers + honest disclosures
-- One resume bullet you can defend in an interview
+- One resume bullet you can defend in an interview``
+-. Build Meridian on Google Cloud and make it production-looking
+
+For your finance/quant-ish Meridian project, deploy it with:
+
+Frontend: Firebase Hosting or Cloud Run
+Backend: Cloud Run
+Database: Firestore, Cloud SQL, or BigQuery depending on the data
+Auth: Firebase Auth
+CI/CD: GitHub Actions → Google Cloud deployment
+Monitoring: Cloud Logging, Error Reporting, uptime checks
+AI feature: Gemini API or Vertex AI integration
 
 ---
 
